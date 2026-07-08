@@ -19,6 +19,7 @@ var (
 	errControlTooBig = errors.New("websocket: control frame payload too large")
 	errBadWriteType  = errors.New("websocket: not a data message type")
 	errUnexpectedEOF = errors.New("websocket: unexpected EOF reading a frame")
+	errInvalidUTF8   = protocolError("invalid UTF-8 in text message")
 )
 
 // protocolError is an error caused by a peer violating the framing protocol. It
@@ -62,6 +63,7 @@ type Conn struct {
 	closeSent        bool
 	writeCompression bool
 	compressionLevel int
+	writeDeadline    time.Time // last deadline set by the user, guarded by writeMu
 }
 
 // newConn builds a Conn around an already-hijacked connection. br may be a
@@ -102,7 +104,14 @@ func (c *Conn) RemoteAddr() net.Addr { return c.conn.RemoteAddr() }
 func (c *Conn) SetReadDeadline(t time.Time) error { return c.conn.SetReadDeadline(t) }
 
 // SetWriteDeadline sets the deadline for future writes. A zero value clears it.
-func (c *Conn) SetWriteDeadline(t time.Time) error { return c.conn.SetWriteDeadline(t) }
+// The deadline is remembered so that the connection's own control writes
+// (auto-pong, close echo) can restore it instead of leaving a stale deadline.
+func (c *Conn) SetWriteDeadline(t time.Time) error {
+	c.writeMu.Lock()
+	c.writeDeadline = t
+	c.writeMu.Unlock()
+	return c.conn.SetWriteDeadline(t)
+}
 
 // SetReadLimit sets the maximum size in bytes of a single received message.
 // A message that would exceed it fails the read and closes the connection with

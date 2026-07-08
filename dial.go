@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -118,10 +119,27 @@ func Dial(ctx context.Context, urlStr string, opts ...DialOption) (*Conn, *http.
 		return nil, resp, ErrBadHandshake
 	}
 
-	_ = netConn.SetDeadline(time.Time{})
+	// A server must not select a subprotocol the client did not offer.
 	subprotocol := resp.Header.Get("Sec-WebSocket-Protocol")
-	compression := cfg.compression && headerOffersDeflate(resp.Header)
+	if subprotocol != "" && !slices.Contains(cfg.subprotocols, subprotocol) {
+		_ = netConn.Close()
+		return nil, resp, ErrBadHandshake
+	}
 
+	// Validate the negotiated permessage-deflate parameters, failing on a
+	// response this client cannot honour (for example missing
+	// server_no_context_takeover or an unknown parameter).
+	compression := false
+	if cfg.compression {
+		ok, err := clientAcceptsDeflateResponse(resp.Header)
+		if err != nil {
+			_ = netConn.Close()
+			return nil, resp, err
+		}
+		compression = ok
+	}
+
+	_ = netConn.SetDeadline(time.Time{})
 	conn := newConn(netConn, false, br, subprotocol, compression, cfg.compressionLevel)
 	return conn, resp, nil
 }

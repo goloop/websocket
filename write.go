@@ -58,8 +58,15 @@ func (c *Conn) WriteControl(mt MessageType, data []byte, deadline time.Time) err
 		return ErrCloseSent
 	}
 
-	if err := c.conn.SetWriteDeadline(deadline); err != nil {
-		return err
+	// A zero deadline means "use the deadline already on the connection", so
+	// only touch it when the caller asked for a specific one, and restore the
+	// user's deadline afterwards so an internal control write (auto-pong, close
+	// echo) never leaves a stale deadline that would kill later writes.
+	if !deadline.IsZero() {
+		if err := c.conn.SetWriteDeadline(deadline); err != nil {
+			return err
+		}
+		defer func() { _ = c.conn.SetWriteDeadline(c.writeDeadline) }()
 	}
 	if err := c.writeFrameLocked(mt, true, false, data); err != nil {
 		return err

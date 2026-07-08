@@ -81,7 +81,8 @@ func isValidReceivedCloseCode(code CloseCode) bool {
 	switch {
 	case code >= 3000 && code <= 4999:
 		return true // registered/private use ranges
-	case code == CloseNoStatusReceived,
+	case code == 1004,
+		code == CloseNoStatusReceived,
 		code == CloseAbnormalClosure,
 		code == CloseTLSHandshake:
 		return false // reserved, must not appear on the wire

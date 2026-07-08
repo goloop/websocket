@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"compress/flate"
+	"encoding/base64"
 	"net/http"
 	"net/url"
 	"strings"
@@ -61,12 +62,15 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 	if challengeKey == "" {
 		return u.fail(w, http.StatusBadRequest, "websocket: missing or empty Sec-WebSocket-Key")
 	}
+	if b, err := base64.StdEncoding.DecodeString(challengeKey); err != nil || len(b) != 16 {
+		return u.fail(w, http.StatusBadRequest, "websocket: invalid Sec-WebSocket-Key")
+	}
 	if !u.originChecker(r) {
 		return u.fail(w, http.StatusForbidden, "websocket: origin not allowed")
 	}
 
 	subprotocol := u.selectSubprotocol(r)
-	compression := u.compression && headerOffersDeflate(r.Header)
+	compression := u.compression && serverAcceptsDeflateOffer(r.Header)
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {

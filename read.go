@@ -58,16 +58,22 @@ func (c *Conn) NextReader() (MessageType, io.Reader, error) {
 
 	src := &frameSource{c: c}
 	if !compressed {
-		return c.readMsgType, &messageReader{c: c, src: src}, nil
+		return c.readMsgType, &messageReader{
+			c: c, src: src, text: opcode == TextMessage,
+		}, nil
 	}
 
 	// Compressed: read the whole (bounded) compressed message, then inflate with
-	// the read limit as a decompression-bomb guard.
-	raw, err := io.ReadAll(io.LimitReader(src, c.readLimit+1))
+	// the read limit as a decompression-bomb guard. The read limit applies to
+	// the decompressed size, so the compressed cap allows for deflate's small
+	// worst-case expansion on incompressible data; the exact limit is enforced
+	// by inflate on the output.
+	compressedCap := c.readLimit + c.readLimit/8 + 64
+	raw, err := io.ReadAll(io.LimitReader(src, compressedCap+1))
 	if err != nil {
 		return 0, nil, c.abort(err)
 	}
-	if int64(len(raw)) > c.readLimit {
+	if int64(len(raw)) > compressedCap {
 		return 0, nil, c.failClose(CloseMessageTooBig, errReadLimit)
 	}
 	data, err := inflate(raw, c.readLimit)
@@ -192,10 +198,13 @@ func (s *frameSource) Read(p []byte) (int, error) {
 }
 
 // messageReader streams an uncompressed message to the application, enforcing
-// the read limit.
+// the read limit and, for text messages, validating UTF-8 incrementally so a
+// rune split across a frame or Read boundary is handled correctly.
 type messageReader struct {
-	c   *Conn
-	src io.Reader
+	c     *Conn
+	src   io.Reader
+	text  bool
+	valid utf8Validator
 }
 
 func (r *messageReader) Read(p []byte) (int, error) {
@@ -209,13 +218,63 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		if c.readLimit > 0 && c.readLength > c.readLimit {
 			return n, c.failClose(CloseMessageTooBig, errReadLimit)
 		}
+		if r.text {
+			if verr := r.valid.write(p[:n]); verr != nil {
+				return n, c.failClose(CloseInvalidFramePayloadData, verr)
+			}
+		}
 	}
 	if err == io.EOF {
+		if r.text {
+			if verr := r.valid.done(); verr != nil {
+				return n, c.failClose(CloseInvalidFramePayloadData, verr)
+			}
+		}
 		c.inMessage = false
 	} else if err != nil {
 		err = c.abort(err)
 	}
 	return n, err
+}
+
+// utf8Validator incrementally checks a byte stream for valid UTF-8, tolerating
+// a rune whose bytes are split across successive write calls.
+type utf8Validator struct {
+	pending []byte // bytes of an incomplete trailing rune (1..3 bytes)
+}
+
+// write validates the next chunk of bytes, carrying over the bytes of an
+// incomplete trailing rune. It returns errInvalidUTF8 on an invalid sequence.
+func (v *utf8Validator) write(p []byte) error {
+	if len(v.pending) > 0 {
+		p = append(v.pending, p...)
+		v.pending = nil
+	}
+	for len(p) > 0 {
+		if p[0] < utf8.RuneSelf {
+			p = p[1:]
+			continue
+		}
+		r, size := utf8.DecodeRune(p)
+		if r == utf8.RuneError && size == 1 {
+			if !utf8.FullRune(p) {
+				// A valid prefix of a rune split across the boundary: carry it.
+				v.pending = append(v.pending[:0], p...)
+				return nil
+			}
+			return errInvalidUTF8
+		}
+		p = p[size:]
+	}
+	return nil
+}
+
+// done reports whether the stream ended on a rune boundary.
+func (v *utf8Validator) done() error {
+	if len(v.pending) > 0 {
+		return errInvalidUTF8
+	}
+	return nil
 }
 
 // readPayload reads up to len(p) bytes of the current frame's payload, unmasking
@@ -240,12 +299,21 @@ func (c *Conn) readPayload(p []byte) (int, error) {
 	return n, err
 }
 
-// drainMessage discards any unread bytes of the current message.
+// drainMessage discards any unread bytes of the current message. The read limit
+// still applies while draining, so a peer cannot force an unbounded discard by
+// leaving a huge message unread.
 func (c *Conn) drainMessage() error {
 	src := &frameSource{c: c}
 	buf := make([]byte, 4096)
+	var drained int64
 	for {
-		_, err := src.Read(buf)
+		n, err := src.Read(buf)
+		if n > 0 {
+			drained += int64(n)
+			if c.readLimit > 0 && drained > c.readLimit {
+				return c.failClose(CloseMessageTooBig, errReadLimit)
+			}
+		}
 		if err == io.EOF {
 			c.inMessage = false
 			return nil

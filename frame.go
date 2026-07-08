@@ -58,6 +58,9 @@ func (c *Conn) readFrameHeader() (opcode MessageType, compressed bool, err error
 	}
 
 	if isControl(opcode) {
+		if opcode != CloseMessage && opcode != PingMessage && opcode != PongMessage {
+			return 0, false, protocolError("unknown opcode")
+		}
 		if !fin {
 			return 0, false, protocolError("fragmented control frame")
 		}

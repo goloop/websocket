@@ -64,7 +64,15 @@ func newDialConfig() *dialConfig {
 	return &dialConfig{
 		compressionLevel: flate.DefaultCompression,
 		netDialer:        &net.Dialer{Timeout: 45 * time.Second},
+		handshakeTimeout: 45 * time.Second,
 	}
+}
+
+// WithDialHandshakeTimeout bounds the time spent on the WebSocket handshake
+// (writing the request and reading the response) when the context carries no
+// deadline of its own. The default is 45s; a value <= 0 disables the bound.
+func WithDialHandshakeTimeout(d time.Duration) DialOption {
+	return func(c *dialConfig) { c.handshakeTimeout = d }
 }
 
 // WithDialHeader adds extra HTTP headers to the client handshake request (for
