@@ -38,6 +38,8 @@ type CloseError struct {
 	Text string
 }
 
+// Error implements the error interface, formatting the close code and, when
+// present, the reason text the peer sent with the close frame.
 func (e *CloseError) Error() string {
 	s := "websocket: close " + strconv.Itoa(int(e.Code))
 	if e.Text != "" {

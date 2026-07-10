@@ -13,6 +13,7 @@ import (
 // it has already written an HTTP error response to the client.
 type HandshakeError struct{ message string }
 
+// Error implements the error interface, returning the reason the upgrade failed.
 func (e HandshakeError) Error() string { return e.message }
 
 // Upgrader holds a reusable server-side upgrade configuration.

@@ -177,6 +177,10 @@ func (c *Conn) handleControl(opcode MessageType) error {
 // frames. It returns io.EOF at the end of the message.
 type frameSource struct{ c *Conn }
 
+// Read pulls the next chunk of the current message's payload, advancing across
+// data frames as needed. It requires each frame after the first to be an
+// uncompressed continuation frame and returns io.EOF once the final frame is
+// exhausted.
 func (s *frameSource) Read(p []byte) (int, error) {
 	c := s.c
 	for c.readRemaining == 0 {
@@ -207,6 +211,9 @@ type messageReader struct {
 	valid utf8Validator
 }
 
+// Read streams the message payload to the caller, propagating any sticky read
+// error and, for text messages, validating UTF-8 incrementally so a rune split
+// across frame or Read boundaries is still checked correctly.
 func (r *messageReader) Read(p []byte) (int, error) {
 	c := r.c
 	if c.readErr != nil {

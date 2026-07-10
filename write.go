@@ -97,6 +97,8 @@ type messageWriter struct {
 	closed bool
 }
 
+// Write appends to the in-memory message buffer. It fails once the writer has
+// been closed; nothing is sent to the peer until Close.
 func (w *messageWriter) Write(p []byte) (int, error) {
 	if w.closed {
 		return 0, errWriteClosed
@@ -104,6 +106,8 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 	return w.buf.Write(p)
 }
 
+// Close flushes the buffered bytes as a single message frame and marks the
+// writer done. It is idempotent: a second call is a no-op and returns nil.
 func (w *messageWriter) Close() error {
 	if w.closed {
 		return nil

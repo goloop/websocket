@@ -26,6 +26,8 @@ var (
 // makes the connection send a 1002 close before failing the read.
 type protocolError string
 
+// Error implements the error interface, prefixing the violation with
+// "websocket: protocol error: ".
 func (e protocolError) Error() string { return "websocket: protocol error: " + string(e) }
 
 // Conn is a WebSocket connection. It carries a single logical stream of
