@@ -257,3 +257,39 @@ func TestOriginAllowedWithChecker(t *testing.T) {
 	}
 	ws.Close()
 }
+
+// unwrapOnlyRW wraps a ResponseWriter exposing only Unwrap and NOT a direct
+// Hijack method - the stdlib-idiomatic middleware shape since Go 1.20. Because
+// the embedded field's static type is http.ResponseWriter (which has no
+// Hijack), a `w.(http.Hijacker)` assertion fails on it; only
+// http.ResponseController, walking Unwrap, can reach the real hijacker.
+type unwrapOnlyRW struct{ http.ResponseWriter }
+
+func (w unwrapOnlyRW) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// TestUpgradeBehindUnwrapOnlyMiddleware guards that Upgrade hijacks through
+// http.ResponseController, so it survives a middleware that only forwards
+// Unwrap. A direct type assertion would fail here.
+func TestUpgradeBehindUnwrapOnlyMiddleware(t *testing.T) {
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Sanity: the wrapper must not expose a direct Hijacker.
+			if _, ok := w.(http.Hijacker); ok {
+				// unreachable for httptest, but keep the intent explicit
+			}
+			next.ServeHTTP(unwrapOnlyRW{w}, r)
+		})
+	}
+	srv := httptest.NewServer(mw(echoHandler()))
+	defer srv.Close()
+
+	ws := dialEcho(t, srv)
+	defer ws.Close()
+	if err := ws.WriteMessage(TextMessage, []byte("hi")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, data, err := ws.ReadMessage()
+	if err != nil || string(data) != "hi" {
+		t.Fatalf("echo = %q, err = %v", data, err)
+	}
+}

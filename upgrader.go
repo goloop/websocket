@@ -3,6 +3,7 @@ package websocket
 import (
 	"compress/flate"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -73,12 +74,14 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 	subprotocol := u.selectSubprotocol(r)
 	compression := u.compression && serverAcceptsDeflateOffer(r.Header)
 
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		return u.fail(w, http.StatusInternalServerError, "websocket: response writer does not support hijacking")
-	}
-	netConn, brw, err := hijacker.Hijack()
+	// Hijack through http.ResponseController so the upgrade also works behind
+	// middleware that wraps the ResponseWriter and exposes only Unwrap (the
+	// stdlib-idiomatic pattern since Go 1.20), not a direct http.Hijacker.
+	netConn, brw, err := http.NewResponseController(w).Hijack()
 	if err != nil {
+		if errors.Is(err, http.ErrNotSupported) {
+			return u.fail(w, http.StatusInternalServerError, "websocket: response writer does not support hijacking")
+		}
 		return nil, err
 	}
 
