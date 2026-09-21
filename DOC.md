@@ -106,7 +106,12 @@ against decompression bombs.
 
 - `SetReadLimit(n)` caps a single message (default 32 MiB).
 - `SetReadDeadline` / `SetWriteDeadline` bound I/O; use them so a slow or stuck
-  peer cannot block a goroutine indefinitely.
+  peer cannot block a goroutine indefinitely. `SetWriteDeadline` also ends a
+  write already in progress, as on a `net.Conn`, so it can be called from
+  another goroutine to unstick one.
+- The deadline passed to `WriteControl` bounds the whole call, including the
+  wait for a data write in progress. When it passes first the frame is not
+  sent and the error reports `Timeout() == true`.
 
 ## Concurrency
 

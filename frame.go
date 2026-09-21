@@ -87,9 +87,9 @@ func (c *Conn) readFrameHeader() (opcode MessageType, compressed bool, err error
 	return opcode, compressed, nil
 }
 
-// writeFrameLocked writes a complete frame. The caller must hold writeMu. As a
-// client the frame is masked with a fresh key; as a server it is not. The
-// caller's payload is never modified.
+// writeFrameLocked writes a complete frame. The caller must hold the write
+// lock. As a client the frame is masked with a fresh key; as a server it is
+// not. The caller's payload is never modified.
 func (c *Conn) writeFrameLocked(opcode MessageType, fin, compressed bool, payload []byte) error {
 	if c.writeErr != nil {
 		return c.writeErr

@@ -59,14 +59,39 @@ type Conn struct {
 	pongHandler  func(string) error
 	closeHandler func(CloseCode, string) error
 
-	// Write state.
-	writeMu          sync.Mutex // guards all writes to conn
-	writeErr         error
-	closeSent        bool
+	// Write state. The write lock is a one-slot channel rather than a mutex
+	// so a control write can give up waiting for it: a data write that is
+	// stuck on a peer that stopped reading must not also hold hostage the
+	// close, ping and pong frames the reader needs to send.
+	writeLock        chan struct{} // holds one token while a write is in progress
+	writeErr         error         // guarded by writeLock
+	closeSent        bool          // guarded by writeLock
 	writeCompression bool
 	compressionLevel int
-	writeDeadline    time.Time // last deadline set by the user, guarded by writeMu
+
+	// The user's write deadline, guarded by its own mutex and never by the
+	// write lock, so setting a deadline can interrupt a write in flight
+	// instead of waiting behind it.
+	deadlineMu    sync.Mutex
+	writeDeadline time.Time
 }
+
+// errWriteTimeout is returned by WriteControl when its deadline passes while a
+// write is still in progress. It reports itself as a timeout so callers can
+// treat it like a deadline on the connection.
+var errWriteTimeout = writeTimeoutError{}
+
+type writeTimeoutError struct{}
+
+// Error implements the error interface.
+func (writeTimeoutError) Error() string { return "websocket: write timeout" }
+
+// Timeout reports true so the error satisfies net.Error's timeout check.
+func (writeTimeoutError) Timeout() bool { return true }
+
+// Temporary reports true: a later control write may succeed once the write in
+// progress finishes.
+func (writeTimeoutError) Temporary() bool { return true }
 
 // newConn builds a Conn around an already-hijacked connection. br may be a
 // buffered reader that already holds bytes read during the handshake.
@@ -81,11 +106,44 @@ func newConn(conn net.Conn, isServer bool, br *bufio.Reader, subprotocol string,
 		subprotocol:      subprotocol,
 		readLimit:        defaultReadLimit,
 		readDecomp:       compression,
+		writeLock:        make(chan struct{}, 1),
 		writeCompression: compression,
 		compressionLevel: level,
 	}
 	return c
 }
+
+// lockWrite takes the write lock, waiting as long as it takes.
+func (c *Conn) lockWrite() { c.writeLock <- struct{}{} }
+
+// lockWriteUntil takes the write lock, giving up with errWriteTimeout once
+// the deadline passes. A zero deadline waits as long as it takes.
+func (c *Conn) lockWriteUntil(deadline time.Time) error {
+	if deadline.IsZero() {
+		c.lockWrite()
+		return nil
+	}
+	select {
+	case c.writeLock <- struct{}{}:
+		return nil
+	default:
+	}
+	wait := time.Until(deadline)
+	if wait <= 0 {
+		return errWriteTimeout
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case c.writeLock <- struct{}{}:
+		return nil
+	case <-timer.C:
+		return errWriteTimeout
+	}
+}
+
+// unlockWrite releases the write lock.
+func (c *Conn) unlockWrite() { <-c.writeLock }
 
 // Subprotocol returns the negotiated subprotocol, or an empty string if none was
 // selected.
@@ -105,14 +163,28 @@ func (c *Conn) RemoteAddr() net.Addr { return c.conn.RemoteAddr() }
 // SetReadDeadline sets the deadline for future reads. A zero value clears it.
 func (c *Conn) SetReadDeadline(t time.Time) error { return c.conn.SetReadDeadline(t) }
 
-// SetWriteDeadline sets the deadline for future writes. A zero value clears it.
-// The deadline is remembered so that the connection's own control writes
-// (auto-pong, close echo) can restore it instead of leaving a stale deadline.
+// SetWriteDeadline sets the deadline for future writes and for a write already
+// in progress, as on a net.Conn. A zero value clears it. The deadline is
+// remembered so that the connection's own control writes (auto-pong, close
+// echo) can restore it instead of leaving a stale deadline.
+//
+// It does not wait for the write lock: a write that is stuck on a peer that
+// stopped reading is exactly what a deadline is for.
 func (c *Conn) SetWriteDeadline(t time.Time) error {
-	c.writeMu.Lock()
+	c.deadlineMu.Lock()
+	defer c.deadlineMu.Unlock()
 	c.writeDeadline = t
-	c.writeMu.Unlock()
 	return c.conn.SetWriteDeadline(t)
+}
+
+// restoreWriteDeadline puts the user's deadline back on the connection after a
+// control write set a temporary one. The store and the call are made under the
+// same lock so a concurrent SetWriteDeadline can never be undone by a stale
+// value.
+func (c *Conn) restoreWriteDeadline() {
+	c.deadlineMu.Lock()
+	_ = c.conn.SetWriteDeadline(c.writeDeadline)
+	c.deadlineMu.Unlock()
 }
 
 // SetReadLimit sets the maximum size in bytes of a single received message.

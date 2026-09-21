@@ -18,8 +18,8 @@ func (c *Conn) WriteMessage(mt MessageType, data []byte) error {
 		return errBadWriteType
 	}
 
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	c.lockWrite()
+	defer c.unlockWrite()
 	if c.writeErr != nil {
 		return c.writeErr
 	}
@@ -39,7 +39,9 @@ func (c *Conn) WriteMessage(mt MessageType, data []byte) error {
 }
 
 // WriteControl sends a control frame (close, ping or pong). The deadline bounds
-// the write; a zero deadline means no timeout. WriteControl may be called from a
+// the whole call, including the wait for a data write in progress to finish;
+// when it passes first the frame is not sent and the error reports a timeout.
+// A zero deadline means no timeout. WriteControl may be called from a
 // goroutine other than the one writing messages.
 func (c *Conn) WriteControl(mt MessageType, data []byte, deadline time.Time) error {
 	if !isControl(mt) {
@@ -49,8 +51,10 @@ func (c *Conn) WriteControl(mt MessageType, data []byte, deadline time.Time) err
 		return errControlTooBig
 	}
 
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	if err := c.lockWriteUntil(deadline); err != nil {
+		return err
+	}
+	defer c.unlockWrite()
 	if c.writeErr != nil {
 		return c.writeErr
 	}
@@ -66,7 +70,7 @@ func (c *Conn) WriteControl(mt MessageType, data []byte, deadline time.Time) err
 		if err := c.conn.SetWriteDeadline(deadline); err != nil {
 			return err
 		}
-		defer func() { _ = c.conn.SetWriteDeadline(c.writeDeadline) }()
+		defer c.restoreWriteDeadline()
 	}
 	if err := c.writeFrameLocked(mt, true, false, data); err != nil {
 		return err

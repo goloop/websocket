@@ -97,7 +97,8 @@ ws.WriteMessage(websocket.TextMessage, []byte("hello"))
   permessage-deflate.
 - **Compression.** permessage-deflate uses "no context takeover" per message.
 - **Deadlines.** Set `SetReadDeadline`/`SetWriteDeadline` to protect against slow
-  peers.
+  peers. `SetWriteDeadline` also ends a write in progress, and the deadline
+  given to `WriteControl` bounds its wait for one.
 
 ## Concurrency
 

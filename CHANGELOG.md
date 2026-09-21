@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-09-21
+
+### Fixed
+- A data write stuck on a peer that stopped reading no longer holds the
+  connection's control frames and deadlines hostage. `WriteControl` waited for
+  the write lock with no bound and applied its deadline only afterwards, and
+  `SetWriteDeadline` took the same lock, so with no deadline set beforehand
+  the ping, pong and close frames the reader sends, and the very call meant
+  to end the stuck write, all hung until `Close`. The deadline given to
+  `WriteControl` now bounds the wait as well and reports a timeout when it
+  passes first, and `SetWriteDeadline` no longer waits for the lock, so it
+  ends a write in progress exactly as it does on a `net.Conn`.
+
 ## [0.1.2] - 2026-07-11
 
 ### Fixed

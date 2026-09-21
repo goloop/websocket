@@ -81,10 +81,10 @@ func TestFragmentedMessageReassembled(t *testing.T) {
 	defer ws.Close()
 
 	// Send "Hel" + "lo" as two frames; the server must reassemble to "Hello".
-	ws.writeMu.Lock()
+	ws.lockWrite()
 	err1 := ws.writeFrameLocked(TextMessage, false, false, []byte("Hel"))
 	err2 := ws.writeFrameLocked(continuationFrame, true, false, []byte("lo"))
-	ws.writeMu.Unlock()
+	ws.unlockWrite()
 	if err1 != nil || err2 != nil {
 		t.Fatalf("write frames: %v %v", err1, err2)
 	}
@@ -103,11 +103,11 @@ func TestControlFrameBetweenFragments(t *testing.T) {
 
 	// A ping arrives between two data fragments; the server must still
 	// reassemble the message and answer the ping.
-	ws.writeMu.Lock()
+	ws.lockWrite()
 	ws.writeFrameLocked(TextMessage, false, false, []byte("Hel"))
 	ws.writeFrameLocked(PingMessage, true, false, []byte("ka"))
 	ws.writeFrameLocked(continuationFrame, true, false, []byte("lo"))
-	ws.writeMu.Unlock()
+	ws.unlockWrite()
 
 	// The pong is consumed by ReadMessage internally; we get the text back.
 	mt, data, err := ws.ReadMessage()
