@@ -77,41 +77,70 @@ func serverAcceptsDeflateOffer(header http.Header) bool {
 	return false
 }
 
-// clientAcceptsDeflateResponse validates the server's permessage-deflate
-// response. It reports whether compression is enabled and errors when the
-// server selected the extension with parameters this client cannot honour: it
-// only supports no-context-takeover with the default window, so the server must
-// confirm server_no_context_takeover and use no other parameters.
-func clientAcceptsDeflateResponse(header http.Header) (bool, error) {
+// validateServerExtensions checks the whole Sec-WebSocket-Extensions reply,
+// not just the part this client hoped for. A server may only select an
+// extension the client offered, so anything else in that header means the two
+// ends disagree about what the connection is, and the handshake is refused.
+//
+// It reports whether permessage-deflate was negotiated.
+func validateServerExtensions(header http.Header, offeredDeflate bool) (bool, error) {
+	var deflates []string
 	for _, line := range header.Values("Sec-WebSocket-Extensions") {
 		for _, ext := range strings.Split(line, ",") {
-			parts := strings.Split(ext, ";")
-			if !strings.EqualFold(strings.TrimSpace(parts[0]), permessageDeflate) {
-				continue
-			}
-			serverNoCtx := false
-			for _, p := range parts[1:] {
-				name, _, _ := strings.Cut(strings.TrimSpace(p), "=")
-				switch strings.ToLower(strings.TrimSpace(name)) {
-				case "server_no_context_takeover":
-					serverNoCtx = true
-				case "client_no_context_takeover":
-					// Acceptable: this client always resets its own context.
-				default:
-					// An unknown or unsupported parameter (window bits, ...).
-					return false, ErrBadHandshake
+			if strings.TrimSpace(ext) == "" {
+				if len(deflates) == 0 && len(header.Values("Sec-WebSocket-Extensions")) == 1 &&
+					strings.TrimSpace(line) == "" {
+					continue // an empty header selects nothing
 				}
-			}
-			if !serverNoCtx {
-				// The inflate context is reset per message, so the server must
-				// also disable context takeover or later messages would not
-				// decompress correctly.
 				return false, ErrBadHandshake
 			}
-			return true, nil
+			name := strings.TrimSpace(strings.Split(ext, ";")[0])
+			if !strings.EqualFold(name, permessageDeflate) {
+				return false, ErrBadHandshake // never offered
+			}
+			deflates = append(deflates, ext)
 		}
 	}
-	return false, nil
+
+	switch {
+	case len(deflates) == 0:
+		return false, nil
+	case !offeredDeflate, len(deflates) > 1:
+		return false, ErrBadHandshake
+	}
+	return deflateParamsAcceptable(deflates[0])
+}
+
+// deflateParamsAcceptable checks one permessage-deflate offer's parameters.
+// This client always resets its context per message and uses the default
+// window, so the server has to confirm server_no_context_takeover and ask for
+// nothing else. Neither flag takes a value, and neither may be repeated.
+func deflateParamsAcceptable(ext string) (bool, error) {
+	seen := map[string]bool{}
+	serverNoCtx := false
+	for _, p := range strings.Split(ext, ";")[1:] {
+		name, value, hasValue := strings.Cut(strings.TrimSpace(p), "=")
+		name = strings.ToLower(strings.TrimSpace(name))
+		switch name {
+		case "client_no_context_takeover", "server_no_context_takeover":
+			if hasValue && strings.TrimSpace(value) != "" {
+				return false, ErrBadHandshake // these flags take no value
+			}
+			if seen[name] {
+				return false, ErrBadHandshake // repeated parameter
+			}
+			seen[name] = true
+			serverNoCtx = serverNoCtx || name == "server_no_context_takeover"
+		default:
+			return false, ErrBadHandshake // window bits or something unknown
+		}
+	}
+	if !serverNoCtx {
+		// The inflate context is reset per message, so the server must also
+		// disable context takeover or later messages would not decompress.
+		return false, ErrBadHandshake
+	}
+	return true, nil
 }
 
 // IsWebSocketUpgrade reports whether r is a WebSocket upgrade request.

@@ -5,6 +5,63 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-23
+
+Minor release: the protocol-contract and API fixes from the audit. Two changes
+are visible to existing code: `Upgrade` now returns a `*HandshakeError`, and
+the default origin policy is stricter.
+
+### Fixed
+- `Upgrade` keeps the headers the handler set before calling it. The `101` is
+  written by hand and ignored `w.Header()` entirely, so a session cookie set
+  with `http.SetCookie`, a trace header or anything a middleware added was
+  dropped while the upgrade reported success. They are carried over now,
+  except the protocol's own headers, which the handshake still controls. A
+  header whose name or value could split the response fails the upgrade
+  instead of being written.
+- `WriteControl` accepts only Close, Ping and Pong. It tested for "any opcode
+  from 8 up", and the frame writer masks an opcode to four bits, so
+  `WriteControl(24, ...)` put a close frame on the wire while the connection
+  went on believing no close had been sent.
+- A close frame is checked before it is sent: the code must be one that may
+  appear on the wire, which rules out 1005, 1006 and 1015, and the reason must
+  be valid UTF-8 and fit a control frame. A bad argument is refused before the
+  write lock is taken, so it neither writes bytes nor changes the connection's
+  state.
+- The client validates every extension the server selected, not only the one
+  it hoped for. An extension that was never offered was accepted and ignored,
+  as were a repeated `permessage-deflate`, a repeated parameter and a value on
+  a flag that takes none. A duplicated `Sec-WebSocket-Accept` or
+  `Sec-WebSocket-Protocol` is refused too, rather than read as its first
+  value.
+- Close code 1014 (Bad Gateway) is a registered code and is accepted from a
+  peer. `CloseBadGateway` names it.
+- A zero `Upgrader`, and `WithOriginChecker(nil)`, no longer panic on the
+  first valid request: both mean the default same-origin policy.
+- `SetReadLimit` no longer wraps around. A limit near `math.MaxInt64`
+  overflowed the derived compressed bound and made the connection reject every
+  message, including a five-byte one. The limit is clamped to the largest
+  value that keeps the arithmetic positive.
+
+### Added
+- `HandshakeError.Status` is the HTTP status the failed upgrade wrote, so a
+  caller can classify a failure without matching on the message.
+- `CloseBadGateway` (1014).
+
+### Changed
+- `Upgrade` returns `*HandshakeError` rather than `HandshakeError`. The
+  reference always described a pointer, and `errors.As(err, &he)` with a
+  `*HandshakeError`, which is what a caller writes, never matched. Code that
+  type-asserted the value form has to take the pointer instead.
+- The default origin policy is stricter. It used to compare only the host of
+  the first `Origin` header, so an `http://` page was accepted by an endpoint
+  served over TLS, and a value with a path, a foreign scheme, or a second
+  `Origin` header went through. It now requires exactly one well-formed
+  origin, an http or https scheme, https when the request arrived over TLS
+  directly, and refuses an opaque `null` origin. Ports are compared only when
+  both sides state one, so a deployment behind a TLS-terminating proxy is
+  unaffected.
+
 ## [0.3.0] - 2026-09-23
 
 Minor release: the limit and memory fixes from the audit. The read limit now

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"strconv"
+	"unicode/utf8"
 )
 
 // CloseCode is a WebSocket close status code (RFC 6455 section 7.4).
@@ -26,6 +27,7 @@ const (
 	CloseInternalServerErr       CloseCode = 1011
 	CloseServiceRestart          CloseCode = 1012
 	CloseTryAgainLater           CloseCode = 1013
+	CloseBadGateway              CloseCode = 1014
 	CloseTLSHandshake            CloseCode = 1015
 )
 
@@ -93,11 +95,36 @@ func isValidReceivedCloseCode(code CloseCode) bool {
 		code == CloseAbnormalClosure,
 		code == CloseTLSHandshake:
 		return false // reserved, must not appear on the wire
-	case code >= 1000 && code <= 1013:
+	case code >= 1000 && code <= 1014:
 		return true
 	default:
 		return false
 	}
+}
+
+// isValidSentCloseCode reports whether code may be put on the wire. The three
+// reserved codes are the ones a program only ever observes locally: they
+// describe how a connection ended, not something a peer can be told.
+func isValidSentCloseCode(code CloseCode) bool {
+	return isValidReceivedCloseCode(code)
+}
+
+// validClosebytes reports whether a close payload is one this connection may
+// send: empty, or a code that may go on the wire followed by a UTF-8 reason,
+// within the control-frame limit.
+func validClosePayload(payload []byte) bool {
+	switch {
+	case len(payload) == 0:
+		return true
+	case len(payload) == 1:
+		return false // a code is two bytes or nothing at all
+	case len(payload) > maxControlFramePayload:
+		return false
+	}
+	if !isValidSentCloseCode(CloseCode(binary.BigEndian.Uint16(payload[:2]))) {
+		return false
+	}
+	return utf8.Valid(payload[2:])
 }
 
 // formatCloseMessage builds a close frame payload: a two-byte big-endian code

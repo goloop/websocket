@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"sync"
 	"time"
@@ -14,13 +15,20 @@ import (
 // its own (auto-pong, close echo) so a stuck peer cannot block the reader.
 const defaultControlDeadline = 10 * time.Second
 
+// maxReadLimit is the largest message limit that keeps the derived compressed
+// bound (limit + limit/8 + 64) a positive int64. It is far past any real
+// message, so clamping to it costs nothing and removes the overflow.
+const maxReadLimit = (math.MaxInt64 - 64) / 2
+
 var (
-	errWriteClosed   = errors.New("websocket: write to closed message writer")
-	errReadLimit     = errors.New("websocket: read limit exceeded")
-	errBadControl    = errors.New("websocket: not a control frame type")
-	errControlTooBig = errors.New("websocket: control frame payload too large")
-	errBadWriteType  = errors.New("websocket: not a data message type")
-	errInvalidUTF8   = protocolError("invalid UTF-8 in text message")
+	errWriteClosed     = errors.New("websocket: write to closed message writer")
+	errReadLimit       = errors.New("websocket: read limit exceeded")
+	errBadControl      = errors.New("websocket: not a control frame type")
+	errControlTooBig   = errors.New("websocket: control frame payload too large")
+	errBadClosePayload = errors.New(
+		"websocket: close payload has a reserved code or invalid reason")
+	errBadWriteType = errors.New("websocket: not a data message type")
+	errInvalidUTF8  = protocolError("invalid UTF-8 in text message")
 
 	// Both EOF sentinels wrap io.ErrUnexpectedEOF so that a caller can match
 	// "the connection ended in the middle of something" with one errors.Is,
@@ -258,6 +266,13 @@ func (c *Conn) SetReadLimit(n int64) {
 	if n <= 0 {
 		n = defaultReadLimit
 	}
+	// The compressed form of a message is allowed a little more than the
+	// limit, and that sum has to stay a positive number: an enormous limit
+	// used to wrap around and reject everything, including a five-byte
+	// message. Anything past this is not a limit anyone means.
+	if n > maxReadLimit {
+		n = maxReadLimit
+	}
 	c.readLimit = n
 }
 
@@ -301,6 +316,11 @@ func (c *Conn) Close() error { return c.conn.Close() }
 // close, after which the reader returns a *CloseError and the caller should call
 // Close. A code of 0 sends an empty close payload.
 func (c *Conn) CloseWithStatus(code CloseCode, reason string) error {
+	// A code of 0 means "no status" and sends an empty payload; anything else
+	// has to be a code this end may put on the wire.
+	if code != 0 && !isValidSentCloseCode(code) {
+		return errBadClosePayload
+	}
 	return c.WriteControl(CloseMessage, formatCloseMessage(code, reason),
 		time.Now().Add(defaultControlDeadline))
 }

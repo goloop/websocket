@@ -184,22 +184,27 @@ func Dial(ctx context.Context, urlStr string, opts ...DialOption) (*Conn, *http.
 		return nil, resp, ErrBadHandshake
 	}
 
+	// Accept and Protocol carry one value each. Header.Get would quietly read
+	// the first of several, which is how a response that says two different
+	// things gets treated as if it said the acceptable one.
+	if len(resp.Header.Values("Sec-WebSocket-Accept")) != 1 ||
+		len(resp.Header.Values("Sec-WebSocket-Protocol")) > 1 {
+		return nil, resp, ErrBadHandshake
+	}
+
 	// A server must not select a subprotocol the client did not offer.
 	subprotocol := resp.Header.Get("Sec-WebSocket-Protocol")
 	if subprotocol != "" && !slices.Contains(cfg.subprotocols, subprotocol) {
 		return nil, resp, ErrBadHandshake
 	}
 
-	// Validate the negotiated permessage-deflate parameters, failing on a
-	// response this client cannot honour (for example missing
-	// server_no_context_takeover or an unknown parameter).
-	compression := false
-	if cfg.compression {
-		ok, derr := clientAcceptsDeflateResponse(resp.Header)
-		if derr != nil {
-			return nil, resp, derr
-		}
-		compression = ok
+	// Validate the extensions the server selected. This runs whether or not
+	// compression was offered: a server that selects an extension the client
+	// never proposed is not speaking the connection this client asked for,
+	// and the frames that follow may not be readable at all.
+	compression, derr := validateServerExtensions(resp.Header, cfg.compression)
+	if derr != nil {
+		return nil, resp, derr
 	}
 
 	hr.release()

@@ -22,11 +22,23 @@ up := websocket.NewUpgrader(opts...); ws, err := up.Upgrade(w, r) // reusable
 ```
 
 On failure `Upgrade` writes an HTTP error response and returns a
-`*HandshakeError`. Options:
+`*HandshakeError`, whose `Status` is the HTTP status that was written.
+Headers the handler set on the `ResponseWriter` before upgrading, a session
+cookie above all, are carried into the `101`; the protocol's own headers are
+not taken from the writer, and a header whose name or value could split the
+response fails the upgrade with `500`.
 
-- `WithOriginChecker(fn)` - decide whether a request's Origin is allowed. The
-  default (`checkSameOrigin`) accepts same-origin requests and requests without
-  an Origin header, blocking cross-site WebSocket hijacking.
+Options:
+
+- `WithOriginChecker(fn)` - decide whether a request's Origin is allowed.
+  Passing `nil` restores the default. That default requires exactly one
+  well-formed `Origin` whose host matches `Host`, refuses an opaque (`null`)
+  origin and a scheme other than http or https, and, when the request arrived
+  over TLS directly, requires an https origin. It compares ports only when
+  both sides state one, because behind a reverse proxy the server sees neither
+  the external scheme nor the external port; a service that needs those in the
+  decision passes its own allowlist here. A request with no Origin, which is
+  what a non-browser client sends, is accepted.
 - `WithSubprotocols(names...)` - subprotocols the server supports, in order of
   preference; the first the client also offers is selected.
 - `WithReadLimit(bytes)` - maximum size of a received message.
@@ -151,6 +163,8 @@ writers, are not supported.
 - `ErrWriteLimit` - a message passed the limit set by `SetWriteLimit`. Nothing
   was sent and the connection stays usable.
 - `*HandshakeError` - the server upgrade failed (an HTTP error was written).
+  `Status` carries that status, so a caller can classify the failure without
+  reading the message.
 - `io.ErrUnexpectedEOF` - the connection ended in the middle of a message. What
   arrived is a prefix, never a whole message, and the error is sticky: further
   reads fail too. Match it with `errors.Is`.

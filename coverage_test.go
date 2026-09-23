@@ -128,7 +128,7 @@ func TestConnAccessors(t *testing.T) {
 }
 
 func TestHandshakeErrorString(t *testing.T) {
-	if (HandshakeError{message: "x"}).Error() != "x" {
+	if (&HandshakeError{message: "x"}).Error() != "x" {
 		t.Fatal("handshake error string")
 	}
 }

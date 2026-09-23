@@ -47,11 +47,20 @@ func (c *Conn) WriteMessage(mt MessageType, data []byte) error {
 // A zero deadline means no timeout. WriteControl may be called from a
 // goroutine other than the one writing messages.
 func (c *Conn) WriteControl(mt MessageType, data []byte, deadline time.Time) error {
-	if !isControl(mt) {
+	// Exactly the three control types, not "any opcode with the high bit
+	// set": the frame writer masks the opcode to four bits, so a number like
+	// 24 used to be written as a close frame while the connection went on
+	// believing it had sent nothing.
+	if mt != CloseMessage && mt != PingMessage && mt != PongMessage {
 		return errBadControl
 	}
 	if len(data) > maxControlFramePayload {
 		return errControlTooBig
+	}
+	if mt == CloseMessage && !validClosePayload(data) {
+		// Refused before the lock is taken, so a bad argument neither writes
+		// bytes nor changes the state of the connection.
+		return errBadClosePayload
 	}
 
 	if err := c.lockWriteUntil(deadline); err != nil {
