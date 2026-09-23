@@ -50,6 +50,17 @@ The scheme must be `ws` or `wss`; `wss` uses TLS. A non-101 reply returns
 - `WithDialTLSConfig(cfg)` - TLS settings for `wss`.
 - `WithDialNetDialer(d)` - the `net.Dialer` used for the TCP connection.
 - `WithDialCompression()` - offer permessage-deflate.
+- `WithDialHandshakeTimeout(d)` - bound the TLS handshake, the request and the
+  response (default 45s).
+- `WithDialHandshakeLimit(n)` - bound the bytes read from the handshake
+  response (default 64 KiB), failing with `ErrHandshakeTooLarge`.
+
+Once the TCP connection is up, the whole handshake runs under one budget: the
+earlier of the context deadline and the handshake timeout, so a long-lived
+context cannot quietly replace a short timeout. Cancelling the context ends the
+handshake straight away rather than at its deadline, and the error then matches
+`context.Canceled`. A connection that was handed back is the caller's: a
+context cancelled afterwards does not close it.
 
 ## Reading and writing
 
@@ -111,7 +122,9 @@ against decompression bombs.
   another goroutine to unstick one.
 - The deadline passed to `WriteControl` bounds the whole call, including the
   wait for a data write in progress. When it passes first the frame is not
-  sent and the error reports `Timeout() == true`.
+  sent and the error reports `Timeout() == true`. It governs that call: it
+  supersedes the deadline the connection already carried, and a concurrent
+  `SetWriteDeadline` may shorten it but cannot lift it.
 
 ## Concurrency
 
@@ -124,5 +137,10 @@ writers, are not supported.
 - `*CloseError{Code, Text}` - the peer closed. Use `IsCloseError(err, codes...)`
   and `IsUnexpectedCloseError(err, expected...)` in a read loop.
 - `ErrBadHandshake` - the client handshake was rejected.
+- `ErrHandshakeTooLarge` - the server's handshake response passed the byte
+  budget.
 - `ErrCloseSent` - a write after the closing handshake began.
 - `*HandshakeError` - the server upgrade failed (an HTTP error was written).
+- `io.ErrUnexpectedEOF` - the connection ended in the middle of a message. What
+  arrived is a prefix, never a whole message, and the error is sticky: further
+  reads fail too. Match it with `errors.Is`.

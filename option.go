@@ -58,21 +58,41 @@ type dialConfig struct {
 	compression      bool
 	compressionLevel int
 	handshakeTimeout time.Duration
+	handshakeLimit   int64
 }
+
+// defaultHandshakeLimit is how many bytes of a server's handshake response
+// Dial reads before giving up. A real 101 reply is a fraction of this; the
+// budget exists so a server that never stops sending headers cannot spend the
+// client's memory.
+const defaultHandshakeLimit = 64 * 1024
 
 func newDialConfig() *dialConfig {
 	return &dialConfig{
 		compressionLevel: flate.DefaultCompression,
 		netDialer:        &net.Dialer{Timeout: 45 * time.Second},
 		handshakeTimeout: 45 * time.Second,
+		handshakeLimit:   defaultHandshakeLimit,
 	}
 }
 
-// WithDialHandshakeTimeout bounds the time spent on the WebSocket handshake
-// (writing the request and reading the response) when the context carries no
-// deadline of its own. The default is 45s; a value <= 0 disables the bound.
+// WithDialHandshakeTimeout bounds the time spent establishing the connection
+// once the TCP dial has succeeded: the TLS handshake for wss, writing the
+// request and reading the response. The default is 45s; a value <= 0 leaves
+// the context as the only bound.
+//
+// When the context carries a deadline of its own, the earlier of the two
+// applies, so a long-lived context cannot quietly replace a short timeout.
 func WithDialHandshakeTimeout(d time.Duration) DialOption {
 	return func(c *dialConfig) { c.handshakeTimeout = d }
+}
+
+// WithDialHandshakeLimit bounds how many bytes of the server's handshake
+// response Dial reads before failing with [ErrHandshakeTooLarge]. The default
+// is 64 KiB; a value <= 0 removes the bound. It applies only to the handshake,
+// so it does not limit messages: use [Conn.SetReadLimit] for those.
+func WithDialHandshakeLimit(bytes int64) DialOption {
+	return func(c *dialConfig) { c.handshakeLimit = bytes }
 }
 
 // WithDialHeader adds extra HTTP headers to the client handshake request (for

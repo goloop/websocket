@@ -189,6 +189,14 @@ func (s *frameSource) Read(p []byte) (int, error) {
 		}
 		opcode, compressed, err := c.nextDataFrame()
 		if err != nil {
+			// The message is not final, so the peer still owes a
+			// continuation frame. A clean EOF here is the connection ending
+			// mid-message; reporting it as io.EOF would hand the caller the
+			// prefix that did arrive as if it were the whole message, and
+			// io.ReadAll would call that a success.
+			if err == io.EOF {
+				err = errIncompleteMessage
+			}
 			return 0, err
 		}
 		if opcode != continuationFrame {

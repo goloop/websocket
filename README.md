@@ -99,6 +99,10 @@ ws.WriteMessage(websocket.TextMessage, []byte("hello"))
 - **Deadlines.** Set `SetReadDeadline`/`SetWriteDeadline` to protect against slow
   peers. `SetWriteDeadline` also ends a write in progress, and the deadline
   given to `WriteControl` bounds its wait for one.
+- **Truncated messages.** A connection that ends between fragments fails with
+  `io.ErrUnexpectedEOF`; a partial message is never returned as a whole one.
+- **Dial budget.** The handshake is bounded in time and in bytes, and answers
+  context cancellation at once.
 
 ## Concurrency
 

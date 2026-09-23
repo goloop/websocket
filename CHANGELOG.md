@@ -5,6 +5,55 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-23
+
+Minor release: the integrity and lifetime fixes from the audit. No function
+was removed or renamed, but a truncated message now fails where it used to
+succeed, so read the first entry before upgrading.
+
+### Fixed
+- A message whose last frame is not final is no longer returned as a whole
+  message. When the connection ended while the peer still owed a continuation
+  frame, the reader reported `io.EOF`, which `io.ReadAll` and `ReadMessage`
+  both read as a clean end of message: the caller got the prefix that had
+  arrived as if it were complete. A plain transport drop was enough to cause
+  it, and a prefix can be a valid command or JSON document on its own. Such a
+  read now fails with an error matching `io.ErrUnexpectedEOF`, and the failure
+  is sticky, so a later read cannot succeed either. The same applies while
+  discarding an unread message and to compressed messages.
+- `Dial` bounds the TLS handshake. The deadline was set only after TLS was
+  negotiated, so a peer that completed the TCP connection and then said
+  nothing held the caller's goroutine and socket indefinitely.
+- `Dial` answers context cancellation during the handshake. Only an absolute
+  `ctx.Deadline()` was carried over to the socket, so `cancel()` did nothing
+  until that deadline, and a context without one never interrupted the
+  handshake at all. The handshake now ends as soon as the context does, with
+  an error matching `context.Canceled` or `context.DeadlineExceeded`. A
+  connection already handed back to the caller is never closed by a late
+  cancellation.
+- `Dial` bounds the size of the handshake response. No limit applied to it
+  (`http.Transport`, which would impose one, is not involved), so a server
+  could send headers until the client ran out of memory. The default budget is
+  64 KiB, and passing it fails with the new `ErrHandshakeTooLarge`.
+- A `SetWriteDeadline` from another goroutine can no longer lift the deadline
+  of a control write in flight. It cleared the socket deadline that
+  `WriteControl` had set for itself, leaving the close or pong the reader was
+  sending blocked on a peer that had stopped reading. Shortening a deadline
+  still takes effect; only lengthening or clearing it is refused for the
+  duration of that call.
+
+### Added
+- `WithDialHandshakeLimit(bytes)` sets the handshake response budget, and
+  `ErrHandshakeTooLarge` reports that it was passed. A value <= 0 removes the
+  bound.
+
+### Changed
+- `WithDialHandshakeTimeout` now bounds the TLS handshake as well as the
+  request and the response, and when the context carries a deadline of its own
+  the earlier of the two applies. It used to be ignored entirely whenever the
+  context had any deadline, so a long-lived context silently replaced a short
+  timeout.
+
 ## [0.1.3] - 2026-09-21
 
 ### Fixed

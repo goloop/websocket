@@ -47,6 +47,16 @@ ws, resp, err := websocket.Dial(ctx, "wss://host/path", opts...)
 - `WithDialTLSConfig(cfg)` - TLS для `wss`.
 - `WithDialNetDialer(d)` - `net.Dialer` для TCP-з'єднання.
 - `WithDialCompression()` - пропонувати permessage-deflate.
+- `WithDialHandshakeTimeout(d)` - обмежує TLS-handshake, запит і відповідь
+  (дефолт 45 с).
+- `WithDialHandshakeLimit(n)` - обмежує обсяг прочитаної відповіді handshake
+  (дефолт 64 КіБ), інакше `ErrHandshakeTooLarge`.
+
+Щойно TCP-з'єднання встановлено, весь handshake іде під одним бюджетом: це
+раніший із дедлайну контексту й handshake-таймауту, тож довгий контекст не
+підмінює короткий таймаут. Скасування контексту завершує handshake одразу, а не
+за дедлайном, і помилка тоді збігається з `context.Canceled`. Уже повернене
+з'єднання належить викликачу: скасований пізніше контекст його не закриває.
 
 ## Читання і запис
 
@@ -108,7 +118,9 @@ permessage-deflate (RFC 7692) узгоджується під час handshake, 
   горутини, щоб зняти застряглий.
 - Дедлайн, переданий у `WriteControl`, обмежує весь виклик, включно з
   очікуванням на запис даних, що триває. Якщо він настає раніше, кадр не
-  надсилається, а помилка повертає `Timeout() == true`.
+  надсилається, а помилка повертає `Timeout() == true`. Він керує саме цим
+  викликом: заміщає дедлайн, який з'єднання вже мало, а паралельний
+  `SetWriteDeadline` може його скоротити, але не зняти.
 
 ## Конкурентність
 
@@ -121,5 +133,9 @@ permessage-deflate (RFC 7692) узгоджується під час handshake, 
 - `*CloseError{Code, Text}` - пір закрив з'єднання. Використовуйте
   `IsCloseError(err, codes...)` і `IsUnexpectedCloseError(err, expected...)`.
 - `ErrBadHandshake` - клієнтський handshake відхилено.
+- `ErrHandshakeTooLarge` - відповідь handshake перевищила байтовий бюджет.
 - `ErrCloseSent` - запис після початку closing-handshake.
 - `*HandshakeError` - серверний upgrade не вдався (HTTP-помилку вже надіслано).
+- `io.ErrUnexpectedEOF` - з'єднання обірвалося посеред повідомлення. Те, що
+  надійшло, є префіксом, а не цілим повідомленням; помилка липка, тож наступні
+  читання теж не вдадуться. Перевіряйте через `errors.Is`.

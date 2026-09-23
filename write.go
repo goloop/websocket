@@ -67,10 +67,10 @@ func (c *Conn) WriteControl(mt MessageType, data []byte, deadline time.Time) err
 	// user's deadline afterwards so an internal control write (auto-pong, close
 	// echo) never leaves a stale deadline that would kill later writes.
 	if !deadline.IsZero() {
-		if err := c.conn.SetWriteDeadline(deadline); err != nil {
+		if err := c.beginControlDeadline(deadline); err != nil {
 			return err
 		}
-		defer c.restoreWriteDeadline()
+		defer c.endControlDeadline()
 	}
 	if err := c.writeFrameLocked(mt, true, false, data); err != nil {
 		return err

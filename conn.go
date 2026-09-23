@@ -3,6 +3,8 @@ package websocket
 import (
 	"bufio"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -18,8 +20,20 @@ var (
 	errBadControl    = errors.New("websocket: not a control frame type")
 	errControlTooBig = errors.New("websocket: control frame payload too large")
 	errBadWriteType  = errors.New("websocket: not a data message type")
-	errUnexpectedEOF = errors.New("websocket: unexpected EOF reading a frame")
 	errInvalidUTF8   = protocolError("invalid UTF-8 in text message")
+
+	// Both EOF sentinels wrap io.ErrUnexpectedEOF so that a caller can match
+	// "the connection ended in the middle of something" with one errors.Is,
+	// whichever half it happened in.
+	errUnexpectedEOF = fmt.Errorf(
+		"websocket: unexpected EOF reading a frame: %w", io.ErrUnexpectedEOF)
+
+	// errIncompleteMessage is the connection ending between fragments, while
+	// the peer still owed a continuation frame. It is not the end of the
+	// message: what arrived so far is a prefix, never a whole message.
+	errIncompleteMessage = fmt.Errorf(
+		"websocket: connection closed before the final fragment: %w",
+		io.ErrUnexpectedEOF)
 )
 
 // protocolError is an error caused by a peer violating the framing protocol. It
@@ -69,11 +83,17 @@ type Conn struct {
 	writeCompression bool
 	compressionLevel int
 
-	// The user's write deadline, guarded by its own mutex and never by the
-	// write lock, so setting a deadline can interrupt a write in flight
-	// instead of waiting behind it.
-	deadlineMu    sync.Mutex
-	writeDeadline time.Time
+	// Write deadlines, guarded by their own mutex and never by the write
+	// lock, so setting a deadline can interrupt a write in flight instead of
+	// waiting behind it. Two deadlines are tracked: the one the user set and
+	// the one an in-flight control write is bounded by. What reaches the
+	// socket is the effective deadline of the two, so neither can silently
+	// lift the other's bound.
+	deadlineMu      sync.Mutex
+	writeDeadline   time.Time // as set by SetWriteDeadline
+	controlDeadline time.Time // of the control write in flight, if any
+	controlActive   bool
+	userSetDuring   bool // SetWriteDeadline was called during that write
 }
 
 // errWriteTimeout is returned by WriteControl when its deadline passes while a
@@ -174,16 +194,57 @@ func (c *Conn) SetWriteDeadline(t time.Time) error {
 	c.deadlineMu.Lock()
 	defer c.deadlineMu.Unlock()
 	c.writeDeadline = t
-	return c.conn.SetWriteDeadline(t)
+	if c.controlActive {
+		c.userSetDuring = true
+	}
+	return c.applyWriteDeadlineLocked()
 }
 
-// restoreWriteDeadline puts the user's deadline back on the connection after a
-// control write set a temporary one. The store and the call are made under the
-// same lock so a concurrent SetWriteDeadline can never be undone by a stale
-// value.
-func (c *Conn) restoreWriteDeadline() {
+// applyWriteDeadlineLocked puts the effective write deadline on the socket.
+// The caller must hold deadlineMu.
+//
+// A control write given an explicit deadline is governed by it: it supersedes
+// whatever deadline the connection already carried, which is what lets the
+// reader answer a ping or send a close with a bound of its own even though the
+// application set a short deadline for its data writes.
+//
+// A SetWriteDeadline call made while that control write is in flight may
+// shorten its bound but never lift it. Shortening is always safe, since asking
+// a write to end sooner cannot leave anything stuck; lengthening it, including
+// clearing it, would break the promise the control call was given, and the
+// reader depends on that promise to get past a peer that stopped reading.
+func (c *Conn) applyWriteDeadlineLocked() error {
+	effective := c.writeDeadline
+	if c.controlActive && !c.controlDeadline.IsZero() {
+		switch {
+		case !c.userSetDuring, effective.IsZero():
+			effective = c.controlDeadline
+		case c.controlDeadline.Before(effective):
+			effective = c.controlDeadline
+		}
+	}
+	return c.conn.SetWriteDeadline(effective)
+}
+
+// beginControlDeadline bounds the control write that is about to start. A zero
+// deadline leaves the user's own deadline in charge.
+func (c *Conn) beginControlDeadline(deadline time.Time) error {
 	c.deadlineMu.Lock()
-	_ = c.conn.SetWriteDeadline(c.writeDeadline)
+	defer c.deadlineMu.Unlock()
+	c.controlDeadline = deadline
+	c.controlActive = true
+	c.userSetDuring = false
+	return c.applyWriteDeadlineLocked()
+}
+
+// endControlDeadline drops the control write's bound and puts the user's own
+// deadline back on the socket.
+func (c *Conn) endControlDeadline() {
+	c.deadlineMu.Lock()
+	c.controlDeadline = time.Time{}
+	c.controlActive = false
+	c.userSetDuring = false
+	_ = c.applyWriteDeadlineLocked()
 	c.deadlineMu.Unlock()
 }
 
