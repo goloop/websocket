@@ -67,13 +67,17 @@ mt, data, err := ws.ReadMessage()          // mt - TextMessage або BinaryMess
 err = ws.WriteMessage(websocket.TextMessage, data)
 ```
 
-Стрімінг (нестиснені повідомлення стрімляться; стиснене спершу повністю
-розпаковується):
+Читання стрімиться (стиснене повідомлення спершу повністю розпаковується),
+запис - ні: `NextWriter` накопичує ціле повідомлення в пам'яті й надсилає його
+на `Close`.
 
 ```go
 mt, r, err := ws.NextReader()   // r - io.Reader
 w, err := ws.NextWriter(websocket.BinaryMessage) // w - io.WriteCloser; Close надсилає
 ```
+
+Через це буферування `io.Copy` у такий writer із необмеженого джерела обмежений
+лише пам'яттю. `SetWriteLimit` перетворює це на помилку, яку можна обробити.
 
 JSON:
 
@@ -111,7 +115,11 @@ permessage-deflate (RFC 7692) узгоджується під час handshake, 
 
 ## Ліміти і дедлайни
 
-- `SetReadLimit(n)` обмежує одне повідомлення (дефолт 32 МіБ).
+- `SetReadLimit(n)` обмежує одне повідомлення (дефолт 32 МіБ). Обмеження
+  стосується всього повідомлення, включно з частиною, пропущеною через
+  відкриття наступного reader-а.
+- `SetWriteLimit(n)` обмежує одне вихідне повідомлення, інакше `ErrWriteLimit`.
+  Дефолт 0 - без обмеження.
 - `SetReadDeadline` / `SetWriteDeadline` обмежують I/O; ставте їх, щоб повільний
   або застряглий пір не блокував горутину. `SetWriteDeadline` також завершує
   вже розпочатий запис, як на `net.Conn`, тож його можна викликати з іншої
@@ -135,6 +143,8 @@ permessage-deflate (RFC 7692) узгоджується під час handshake, 
 - `ErrBadHandshake` - клієнтський handshake відхилено.
 - `ErrHandshakeTooLarge` - відповідь handshake перевищила байтовий бюджет.
 - `ErrCloseSent` - запис після початку closing-handshake.
+- `ErrWriteLimit` - повідомлення перевищило межу `SetWriteLimit`. Нічого не
+  надіслано, з'єднання лишається робочим.
 - `*HandshakeError` - серверний upgrade не вдався (HTTP-помилку вже надіслано).
 - `io.ErrUnexpectedEOF` - з'єднання обірвалося посеред повідомлення. Те, що
   надійшло, є префіксом, а не цілим повідомленням; помилка липка, тож наступні

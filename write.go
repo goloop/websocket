@@ -17,6 +17,9 @@ func (c *Conn) WriteMessage(mt MessageType, data []byte) error {
 	if mt != TextMessage && mt != BinaryMessage {
 		return errBadWriteType
 	}
+	if c.writeLimit > 0 && int64(len(data)) > c.writeLimit {
+		return ErrWriteLimit
+	}
 
 	c.lockWrite()
 	defer c.unlockWrite()
@@ -91,9 +94,11 @@ func (c *Conn) NextWriter(mt MessageType) (io.WriteCloser, error) {
 	return &messageWriter{c: c, mt: mt}, nil
 }
 
-// messageWriter buffers a message and sends it as one frame on Close. It is a
-// simple, correct writer for v0; true streaming fragmentation can be added later
-// without changing this API.
+// messageWriter buffers a message and sends it as one frame on Close.
+//
+// It is not a streaming writer: nothing reaches the network until Close, so
+// the whole message is held in memory first. [Conn.SetWriteLimit] bounds that.
+// True streaming fragmentation can be added later without changing this API.
 type messageWriter struct {
 	c      *Conn
 	mt     MessageType
@@ -107,6 +112,12 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 	if w.closed {
 		return 0, errWriteClosed
 	}
+	if limit := w.c.writeLimit; limit > 0 &&
+		int64(w.buf.Len())+int64(len(p)) > limit {
+		// Refuse before buffering: the point of the limit is to stop the
+		// buffer growing, so accepting these bytes first would defeat it.
+		return 0, ErrWriteLimit
+	}
 	return w.buf.Write(p)
 }
 
@@ -117,5 +128,16 @@ func (w *messageWriter) Close() error {
 		return nil
 	}
 	w.closed = true
-	return w.c.WriteMessage(w.mt, w.buf.Bytes())
+
+	c := w.c
+	err := c.WriteMessage(w.mt, w.buf.Bytes())
+
+	// Let the message go. An application that keeps a closed writer, which is
+	// easy to do when one is stored in a struct, would otherwise hold the
+	// whole buffer and the connection with it. Both methods above check
+	// w.closed first, so nothing here is read again.
+	w.buf = bytes.Buffer{}
+	w.c = nil
+
+	return err
 }

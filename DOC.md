@@ -71,13 +71,18 @@ mt, data, err := ws.ReadMessage()          // mt is TextMessage or BinaryMessage
 err = ws.WriteMessage(websocket.TextMessage, data)
 ```
 
-Streaming (uncompressed messages are streamed; a compressed message is inflated
-in full first):
+Reading is streamed (a compressed message is inflated in full first); writing
+is not: `NextWriter` buffers the whole message in memory and sends it on
+`Close`.
 
 ```go
 mt, r, err := ws.NextReader()   // r is an io.Reader
 w, err := ws.NextWriter(websocket.BinaryMessage) // w is an io.WriteCloser; Close sends
 ```
+
+Because the message is buffered, `io.Copy` into that writer from an unbounded
+source is bounded by nothing but memory. `SetWriteLimit` turns that into an
+error you can handle.
 
 JSON:
 
@@ -115,7 +120,10 @@ against decompression bombs.
 
 ## Limits and deadlines
 
-- `SetReadLimit(n)` caps a single message (default 32 MiB).
+- `SetReadLimit(n)` caps a single message (default 32 MiB). The cap covers the
+  whole message, including any part skipped by opening the next reader.
+- `SetWriteLimit(n)` caps a single outgoing message, failing with
+  `ErrWriteLimit`. The default, 0, means no cap.
 - `SetReadDeadline` / `SetWriteDeadline` bound I/O; use them so a slow or stuck
   peer cannot block a goroutine indefinitely. `SetWriteDeadline` also ends a
   write already in progress, as on a `net.Conn`, so it can be called from
@@ -140,6 +148,8 @@ writers, are not supported.
 - `ErrHandshakeTooLarge` - the server's handshake response passed the byte
   budget.
 - `ErrCloseSent` - a write after the closing handshake began.
+- `ErrWriteLimit` - a message passed the limit set by `SetWriteLimit`. Nothing
+  was sent and the connection stays usable.
 - `*HandshakeError` - the server upgrade failed (an HTTP error was written).
 - `io.ErrUnexpectedEOF` - the connection ended in the middle of a message. What
   arrived is a prefix, never a whole message, and the error is sticky: further

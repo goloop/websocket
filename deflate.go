@@ -11,6 +11,12 @@ import (
 // permessage-deflate (RFC 7692) the sender strips them from an outgoing message.
 var deflateSyncTail = []byte{0x00, 0x00, 0xff, 0xff}
 
+// emptyFlateSource is what a pooled flate reader is pointed at on its way back
+// to the pool, so it stops referencing the message it just worked on. A reader
+// over a nil slice is immutable and always at EOF, so one value is safe to
+// share.
+var emptyFlateSource = bytes.NewReader(nil)
+
 // inflateTail is appended before decompressing: the sync-flush octets the sender
 // removed, followed by a final empty stored block (0x01 0x00 0x00 0xff 0xff).
 // The final block lets flate terminate the headerless stream cleanly instead of
@@ -58,7 +64,14 @@ func deflate(data []byte, level int) ([]byte, error) {
 // errReadLimit, which guards against decompression bombs.
 func inflate(payload []byte, limit int64) ([]byte, error) {
 	fr := flateReaderPool.Get().(io.ReadCloser)
-	defer flateReaderPool.Put(fr)
+	defer func() {
+		// Detach the payload first. Close alone does not clear the source in
+		// the flate reader, so a reader parked in the pool after a failed or
+		// partly consumed message would keep that message reachable for as
+		// long as the pool held it.
+		_ = fr.(flate.Resetter).Reset(emptyFlateSource, nil)
+		flateReaderPool.Put(fr)
+	}()
 
 	src := io.MultiReader(bytes.NewReader(payload), bytes.NewReader(inflateTail))
 	if err := fr.(flate.Resetter).Reset(src, nil); err != nil {
@@ -91,5 +104,8 @@ func getFlateWriter(w io.Writer, level int) *flate.Writer {
 }
 
 func putFlateWriter(fw *flate.Writer, level int) {
+	// Detach the output buffer: a pooled writer that still points at it keeps
+	// the compressed message, which can be megabytes, reachable.
+	fw.Reset(io.Discard)
 	flateWriterPools[level+flateLevelOffset].Put(fw)
 }

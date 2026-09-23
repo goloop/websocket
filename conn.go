@@ -65,8 +65,10 @@ type Conn struct {
 	readLimit     int64
 	readLength    int64 // bytes delivered for the current message (for the limit)
 	readMsgType   MessageType
-	inMessage     bool // a message is currently being read across frames
-	readDecomp    bool // permessage-deflate negotiated for reading
+	reader        *messageReader // the reader handed out for the message in flight
+	inflated      []byte         // payload of the compressed message just returned
+	inMessage     bool           // a message is currently being read across frames
+	readDecomp    bool           // permessage-deflate negotiated for reading
 
 	// Handlers for received control frames.
 	pingHandler  func(string) error
@@ -82,6 +84,7 @@ type Conn struct {
 	closeSent        bool          // guarded by writeLock
 	writeCompression bool
 	compressionLevel int
+	writeLimit       int64 // max size of one outgoing message, 0 for no bound
 
 	// Write deadlines, guarded by their own mutex and never by the write
 	// lock, so setting a deadline can interrupt a write in flight instead of
@@ -256,6 +259,24 @@ func (c *Conn) SetReadLimit(n int64) {
 		n = defaultReadLimit
 	}
 	c.readLimit = n
+}
+
+// SetWriteLimit sets the maximum size in bytes of a single outgoing message.
+// A write past it fails with [ErrWriteLimit] and nothing is sent; the
+// connection stays usable. A value <= 0, the default, means no bound.
+//
+// It exists because a message is built in memory before any of it goes out:
+// [Conn.NextWriter] buffers everything written to it until Close, so
+// io.Copy from an unbounded source is bounded by nothing but available
+// memory. A limit turns that into an error the application can handle.
+//
+// Like SetReadLimit it is not synchronized with writes in progress: set it
+// before the connection is handed to the code that writes.
+func (c *Conn) SetWriteLimit(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	c.writeLimit = n
 }
 
 // SetPingHandler sets the handler for received ping frames. The default sends a

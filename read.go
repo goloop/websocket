@@ -16,6 +16,14 @@ func (c *Conn) ReadMessage() (MessageType, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
+	// A compressed message was already inflated into one buffer, and its
+	// UTF-8 was already checked, by NextReader. Copying it again here would
+	// double the peak memory of every compressed message for nothing.
+	if data := c.inflated; data != nil {
+		c.inflated = nil
+		return mt, data, nil
+	}
+
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return 0, nil, err
@@ -55,12 +63,17 @@ func (c *Conn) NextReader() (MessageType, io.Reader, error) {
 	c.inMessage = true
 	c.readMsgType = opcode
 	c.readLength = 0
+	c.reader = nil
+	c.inflated = nil
 
 	src := &frameSource{c: c}
 	if !compressed {
-		return c.readMsgType, &messageReader{
-			c: c, src: src, text: opcode == TextMessage,
-		}, nil
+		// The reader is kept so that discarding this message later runs
+		// through it, sharing its budget and its UTF-8 state instead of
+		// starting both again from zero.
+		mr := &messageReader{c: c, src: src, text: opcode == TextMessage}
+		c.reader = mr
+		return c.readMsgType, mr, nil
 	}
 
 	// Compressed: read the whole (bounded) compressed message, then inflate with
@@ -88,6 +101,7 @@ func (c *Conn) NextReader() (MessageType, io.Reader, error) {
 			protocolError("invalid UTF-8 in text message"))
 	}
 	c.inMessage = false
+	c.inflated = data
 	return c.readMsgType, bytes.NewReader(data), nil
 }
 
@@ -227,11 +241,23 @@ func (r *messageReader) Read(p []byte) (int, error) {
 	if c.readErr != nil {
 		return 0, c.readErr
 	}
+	if c.readLimit > 0 {
+		// Read at most one byte past the budget: enough to tell a message
+		// that ends exactly on the limit from one that runs past it, without
+		// pulling in more of an oversized message than the limit allows.
+		if room := c.readLimit - c.readLength + 1; int64(len(p)) > room {
+			p = p[:room]
+		}
+	}
 	n, err := r.src.Read(p)
 	if n > 0 {
 		c.readLength += int64(n)
 		if c.readLimit > 0 && c.readLength > c.readLimit {
-			return n, c.failClose(CloseMessageTooBig, errReadLimit)
+			// None of this chunk is handed over. An io.Reader may use the
+			// bytes it was given even when an error comes with them, so
+			// returning them here would let the message the limit rejected
+			// reach the application anyway.
+			return 0, c.failClose(CloseMessageTooBig, errReadLimit)
 		}
 		if r.text {
 			if verr := r.valid.write(p[:n]); verr != nil {
@@ -246,6 +272,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 			}
 		}
 		c.inMessage = false
+		c.reader = nil
 	} else if err != nil {
 		err = c.abort(err)
 	}
@@ -314,24 +341,27 @@ func (c *Conn) readPayload(p []byte) (int, error) {
 	return n, err
 }
 
-// drainMessage discards any unread bytes of the current message. The read limit
-// still applies while draining, so a peer cannot force an unbounded discard by
-// leaving a huge message unread.
+// drainMessage discards any unread bytes of the current message.
+//
+// It reads through the same reader the application was given, so the bytes it
+// skips count against the same budget and run through the same UTF-8 state.
+// Draining through a fresh source instead, as it once did, restarted both:
+// a message could be read up to the limit and then skipped up to the limit
+// again, and the invalid UTF-8 in a part that was skipped was never seen.
 func (c *Conn) drainMessage() error {
-	src := &frameSource{c: c}
+	r := c.reader
+	if r == nil {
+		// Nothing was handed out for this message, so there is nothing whose
+		// state the discard has to share.
+		c.inMessage = false
+		return nil
+	}
+
 	buf := make([]byte, 4096)
-	var drained int64
 	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			drained += int64(n)
-			if c.readLimit > 0 && drained > c.readLimit {
-				return c.failClose(CloseMessageTooBig, errReadLimit)
-			}
-		}
+		_, err := r.Read(buf)
 		if err == io.EOF {
-			c.inMessage = false
-			return nil
+			return nil // Read has already closed the message out
 		}
 		if err != nil {
 			return err

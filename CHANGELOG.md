@@ -5,6 +5,47 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-23
+
+Minor release: the limit and memory fixes from the audit. The read limit now
+means what it says, which is stricter than before on messages that were only
+partly read.
+
+### Fixed
+- The read limit covers a whole message, including the part skipped when the
+  next reader is opened. Discarding the rest of a message built a fresh source
+  with a counter of its own, so a message could be read up to the limit and
+  then skipped up to the limit again, letting roughly twice the budget through
+  for one message.
+- A text message is checked as UTF-8 in the part that was skipped too. The
+  discard did not carry the reader's UTF-8 state, so invalid bytes in the
+  skipped remainder were never reported.
+- An oversized message no longer hands its bytes to the caller along with the
+  error. `Read` returned the whole chunk it had read together with the
+  limit error, and an io.Reader consumer is entitled to use bytes it was
+  given, so `io.Copy` passed them downstream. Nothing past the limit is
+  returned now. A message exactly the size of the limit is still accepted.
+- Pooled compressors let go of the message they worked on. A flate writer went
+  back to the pool still pointing at the compressed output, and a flate reader
+  still pointing at the payload of a message that failed to inflate, keeping
+  buffers of the message's own size reachable for as long as the pool held the
+  object.
+- A closed `NextWriter` releases its buffer. A writer kept by the application
+  after `Close` held the whole message, and the connection with it.
+- `ReadMessage` no longer copies a compressed message a second time. It was
+  inflated into one buffer and then copied again through `io.ReadAll`, which
+  doubled the peak memory of every compressed message.
+
+### Added
+- `SetWriteLimit(n)` caps a single outgoing message, failing with the new
+  `ErrWriteLimit` before anything is buffered or sent. The default, 0, means
+  no cap, so nothing changes for a caller that does not set one.
+
+### Changed
+- The reference no longer calls `NextWriter` streaming. It buffers the whole
+  message and sends it on `Close`, which is what it always did; only the
+  wording was wrong.
+
 ## [0.2.0] - 2026-09-23
 
 Minor release: the integrity and lifetime fixes from the audit. No function

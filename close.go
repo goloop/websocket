@@ -32,6 +32,11 @@ const (
 // ErrCloseSent is returned by a write after the closing handshake has started.
 var ErrCloseSent = errors.New("websocket: close sent")
 
+// ErrWriteLimit is returned when a message would exceed the limit set by
+// [Conn.SetWriteLimit]. Nothing is written and the connection stays usable,
+// so a caller can send something smaller instead.
+var ErrWriteLimit = errors.New("websocket: write limit exceeded")
+
 // CloseError records the close code and reason received from the peer.
 type CloseError struct {
 	Code CloseCode
