@@ -66,6 +66,17 @@ The scheme must be `ws` or `wss`; `wss` uses TLS. A non-101 reply returns
   response (default 45s).
 - `WithDialHandshakeLimit(n)` - bound the bytes read from the handshake
   response (default 64 KiB), failing with `ErrHandshakeTooLarge`.
+- `WithDialReadLimit(bytes)` / `WithDialCompressionLevel(level)` - the
+  client-side counterparts of `WithReadLimit` and `WithCompressionLevel`.
+
+`Conn.CompressionEnabled()` reports whether permessage-deflate was actually
+negotiated, which is not the same as having asked for it.
+
+An option given a value this package cannot use - a compression level out of
+range, a subprotocol that is not an HTTP token - fails with `ErrConfig` from
+`Dial`, or a `500` from `Upgrade`, instead of being replaced by a default.
+Slices, headers and TLS configs passed to options are copied, so the caller
+may keep using its own.
 
 Once the TCP connection is up, the whole handshake runs under one budget: the
 earlier of the context deadline and the handshake timeout, so a long-lived

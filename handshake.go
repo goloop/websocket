@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -47,11 +48,19 @@ func tokenListContainsValue(header http.Header, name, value string) bool {
 }
 
 // serverAcceptsDeflateOffer reports whether a client's Sec-WebSocket-Extensions
-// offer includes a permessage-deflate configuration this server can honour. The
-// server always replies with the full window and no context takeover, so it
-// only accepts an offer whose parameters are a subset of the no-context-takeover
-// flags; a window-bits constraint or an unknown parameter means the offer is
-// declined (compression is simply not enabled) rather than answered incorrectly.
+// offer includes a permessage-deflate configuration this server can honour.
+//
+// The server always replies with the full window and no context takeover, so
+// it accepts the no-context-takeover flags and client_max_window_bits, and
+// declines anything else. Declining means compression is simply not enabled,
+// which is allowed, rather than answering an offer incorrectly.
+//
+// client_max_window_bits is accepted and not echoed. Without a value it only
+// tells the server it may cap the client's window, an offer this server does
+// not take up; with a value it promises the client will compress with a
+// window no larger than that, which this server's full-size window can always
+// decompress. Declining the whole offer over it meant no compression at all
+// with the browsers that send it.
 func serverAcceptsDeflateOffer(header http.Header) bool {
 	for _, line := range header.Values("Sec-WebSocket-Extensions") {
 		for _, ext := range strings.Split(line, ",") {
@@ -59,22 +68,50 @@ func serverAcceptsDeflateOffer(header http.Header) bool {
 			if !strings.EqualFold(strings.TrimSpace(parts[0]), permessageDeflate) {
 				continue
 			}
-			ok := true
-			for _, p := range parts[1:] {
-				name, _, _ := strings.Cut(strings.TrimSpace(p), "=")
-				switch strings.ToLower(strings.TrimSpace(name)) {
-				case "client_no_context_takeover", "server_no_context_takeover":
-					// Compatible with our fixed no-context-takeover behaviour.
-				default:
-					ok = false
-				}
-			}
-			if ok {
+			if deflateOfferAcceptable(parts[1:]) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// deflateOfferAcceptable reports whether every parameter of one offer is one
+// this server can live with. A repeated parameter is refused: an offer that
+// says a thing twice has not said it more clearly.
+func deflateOfferAcceptable(params []string) bool {
+	seen := map[string]bool{}
+	for _, p := range params {
+		name, value, hasValue := strings.Cut(strings.TrimSpace(p), "=")
+		name = strings.ToLower(strings.TrimSpace(name))
+		value = strings.Trim(strings.TrimSpace(value), `"`)
+		if name == "" || seen[name] {
+			return false
+		}
+		seen[name] = true
+
+		switch name {
+		case "client_no_context_takeover", "server_no_context_takeover":
+			if hasValue && value != "" {
+				return false // these flags take no value
+			}
+		case "client_max_window_bits":
+			if hasValue && !validWindowBits(value) {
+				return false
+			}
+		default:
+			// server_max_window_bits would require this server to shrink its
+			// own window, which it cannot do, and anything else is unknown.
+			return false
+		}
+	}
+	return true
+}
+
+// validWindowBits reports whether s is a window size this protocol allows.
+func validWindowBits(s string) bool {
+	n, err := strconv.Atoi(s)
+	return err == nil && n >= 8 && n <= 15
 }
 
 // validateServerExtensions checks the whole Sec-WebSocket-Extensions reply,

@@ -61,6 +61,16 @@ ws, resp, err := websocket.Dial(ctx, "wss://host/path", opts...)
   (дефолт 45 с).
 - `WithDialHandshakeLimit(n)` - обмежує обсяг прочитаної відповіді handshake
   (дефолт 64 КіБ), інакше `ErrHandshakeTooLarge`.
+- `WithDialReadLimit(bytes)` / `WithDialCompressionLevel(level)` - клієнтські
+  відповідники `WithReadLimit` і `WithCompressionLevel`.
+
+`Conn.CompressionEnabled()` повідомляє, чи permessage-deflate справді
+узгоджено, - це не те саме, що попросити його.
+
+Опція з непридатним значенням (рівень стиснення поза діапазоном, subprotocol,
+який не є HTTP-token) дає `ErrConfig` із `Dial` або `500` з `Upgrade`, замість
+тихої підміни дефолтом. Слайси, заголовки й TLS-конфіги, передані в опції,
+копіюються - свою копію можна далі використовувати.
 
 Щойно TCP-з'єднання встановлено, весь handshake іде під одним бюджетом: це
 раніший із дедлайну контексту й handshake-таймауту, тож довгий контекст не

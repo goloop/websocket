@@ -29,6 +29,7 @@ func (e *HandshakeError) Error() string { return e.message }
 
 // Upgrader holds a reusable server-side upgrade configuration.
 type Upgrader struct {
+	cfgErr           error
 	originChecker    func(*http.Request) bool
 	subprotocols     []string
 	readLimit        int64
@@ -60,6 +61,11 @@ func Upgrade(w http.ResponseWriter, r *http.Request, opts ...Option) (*Conn, err
 // writes an HTTP error response and returns a *HandshakeError (or the hijack
 // error).
 func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error) {
+	if u.cfgErr != nil {
+		// A bad option is the server's own fault, and saying so on the first
+		// request beats compressing with the wrong level for a year.
+		return u.fail(w, http.StatusInternalServerError, u.cfgErr.Error())
+	}
 	if r.Method != http.MethodGet {
 		return u.fail(w, http.StatusMethodNotAllowed, "websocket: request method is not GET")
 	}

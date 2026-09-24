@@ -5,6 +5,38 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-24
+
+Minor release: configuration that is checked rather than guessed, and
+compression that engages with the browsers that ask for it.
+
+### Fixed
+- A `permessage-deflate` offer carrying `client_max_window_bits` is accepted.
+  The server declined the whole offer over that parameter, so a browser that
+  sends it, which is the common case, got no compression at all. The parameter
+  is accepted and not echoed: without a value it only says the server may cap
+  the client's window, which this server does not do, and with a value it
+  promises a window this server's own full-size window can always decompress.
+  `server_max_window_bits`, which would require shrinking this server's
+  window, is still declined.
+- A `permessage-deflate` offer with a repeated parameter, or a value on a flag
+  that takes none, is declined instead of accepted.
+- Options copy what the caller still owns. `WithSubprotocols`,
+  `WithDialSubprotocols`, `WithDialHeader` and `WithDialTLSConfig` kept the
+  caller's slice, header or config, so a later change reached into a
+  connection that was already configured.
+
+### Added
+- `ErrConfig` and configuration checking. A compression level outside the
+  flate range, or a subprotocol that is not an HTTP token, now fails: `Dial`
+  returns `ErrConfig` before touching the network, and `Upgrade` answers 500
+  on the first request. An out-of-range level used to be replaced by the
+  default, which hid the mistake behind working compression.
+- `WithDialReadLimit` and `WithDialCompressionLevel`, the client-side
+  counterparts of the server options of the same name.
+- `Conn.CompressionEnabled` reports whether permessage-deflate was negotiated.
+  Asking for it and getting it were indistinguishable before.
+
 ## [0.5.0] - 2026-09-24
 
 Minor release: errors a caller can act on. A connection that drops without a

@@ -37,6 +37,10 @@ func Dial(ctx context.Context, urlStr string, opts ...DialOption) (*Conn, *http.
 		opt(cfg)
 	}
 
+	if cfg.cfgErr != nil {
+		return nil, nil, cfg.cfgErr
+	}
+
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return nil, nil, err
@@ -210,6 +214,9 @@ func Dial(ctx context.Context, urlStr string, opts ...DialOption) (*Conn, *http.
 	hr.release()
 	_ = netConn.SetDeadline(time.Time{})
 	conn := newConn(netConn, false, br, subprotocol, compression, cfg.compressionLevel)
+	if cfg.readLimit > 0 {
+		conn.SetReadLimit(cfg.readLimit)
+	}
 
 	// The connection is the caller's from here: the deferred close must not
 	// take it, and a cancellation callback that fires from now on must not

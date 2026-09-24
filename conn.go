@@ -34,6 +34,11 @@ var (
 	// error's own text says which rule was broken.
 	ErrProtocol = errors.New("websocket: protocol error")
 
+	// ErrConfig means an option was given a value this package cannot use.
+	// It surfaces from Upgrade or Dial before anything reaches the network,
+	// rather than being quietly replaced by a default.
+	ErrConfig = errors.New("websocket: invalid configuration")
+
 	// The rest are programming errors: the arguments of a call were wrong,
 	// so nothing is written and the connection is left as it was.
 	ErrWriteClosed     = errors.New("websocket: write to closed message writer")
@@ -200,6 +205,12 @@ func (c *Conn) unlockWrite() { <-c.writeLock }
 // Subprotocol returns the negotiated subprotocol, or an empty string if none was
 // selected.
 func (c *Conn) Subprotocol() string { return c.subprotocol }
+
+// CompressionEnabled reports whether permessage-deflate was negotiated for
+// this connection. Asking for compression is not the same as getting it: the
+// other end may decline, or offer terms this package will not accept, and
+// until now there was no way to tell which had happened.
+func (c *Conn) CompressionEnabled() bool { return c.writeCompression }
 
 // NetConn returns the underlying network connection. Reading from or writing to
 // it directly will corrupt the WebSocket stream; it is an escape hatch for
