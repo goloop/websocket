@@ -422,18 +422,30 @@ func (c *Conn) abort(err error) error {
 
 // asAbnormalClose reports the connection ending without a closing handshake
 // the way every other ending is reported: as a *CloseError. Without it, a peer
-// that simply vanished produced a bare io.EOF, which IsUnexpectedCloseError
-// does not recognise, so the one helper meant for telling a clean shutdown
-// from a surprising one stayed silent for the most surprising case of all.
+// that simply vanished produced a bare io.EOF or a network error, neither of
+// which IsUnexpectedCloseError recognises, so the one helper meant for telling
+// a clean shutdown from a surprising one stayed silent for the most surprising
+// cases of all.
 //
-// The original error is kept as the cause, so matching io.EOF or
-// io.ErrUnexpectedEOF with errors.Is keeps working.
+// Every way a connection can end counts: the orderly end of the stream, a
+// stream that stopped mid-frame, and a network failure such as a reset or a
+// broken pipe. A timeout does not: the connection is still there, and the
+// deadline was the caller's own decision, so it stays the error it was.
+//
+// The original error is kept as the cause, so matching io.EOF,
+// io.ErrUnexpectedEOF or syscall.ECONNRESET with errors.Is keeps working.
 func asAbnormalClose(err error) error {
 	var ce *CloseError
 	if errors.As(err, &ce) {
 		return err // the peer said why
 	}
-	if err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
+
+	abnormal := err == io.EOF || errors.Is(err, io.ErrUnexpectedEOF)
+	if !abnormal {
+		var ne net.Error
+		abnormal = errors.As(err, &ne) && !ne.Timeout()
+	}
+	if !abnormal {
 		return err // a fault of its own, not the connection ending
 	}
 	return &CloseError{Code: CloseAbnormalClosure, cause: err}

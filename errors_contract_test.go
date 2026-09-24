@@ -3,8 +3,11 @@ package websocket
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -116,4 +119,78 @@ func TestCloseHandlerErrorReachesTheCaller(t *testing.T) {
 	if _, _, err := ws.ReadMessage(); !errors.Is(err, sentinel) {
 		t.Errorf("err = %v, want the handler's own error", err)
 	}
+}
+
+// Every way a connection can end without a closing handshake is reported the
+// same way, so one IsUnexpectedCloseError covers them all. A timeout is not
+// one of them: the connection is still there and the deadline was the
+// caller's own decision.
+func TestNetworkFailureIsAnAbnormalClose(t *testing.T) {
+	t.Run("connection reset", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				ws, err := Upgrade(w, r)
+				if err != nil {
+					return
+				}
+				// Linger 0 makes the close send RST instead of FIN, which is
+				// what a crashed peer or a killed container looks like.
+				if tc, ok := ws.NetConn().(*net.TCPConn); ok {
+					_ = tc.SetLinger(0)
+				}
+				ws.Close()
+			}))
+		defer srv.Close()
+
+		ws, _, err := Dial(context.Background(), "ws"+srv.URL[4:])
+		if err != nil {
+			t.Fatalf("Dial: %v", err)
+		}
+		defer ws.Close()
+
+		time.Sleep(50 * time.Millisecond)
+		_, _, err = ws.ReadMessage()
+
+		var ce *CloseError
+		if !errors.As(err, &ce) || ce.Code != CloseAbnormalClosure {
+			t.Fatalf("err = %#v, want a 1006 *CloseError", err)
+		}
+		if !IsUnexpectedCloseError(err, CloseNormalClosure) {
+			t.Error("a reset connection was not reported as an unexpected close")
+		}
+		if ce.Unwrap() == nil {
+			t.Error("the network error was not kept as the cause")
+		}
+	})
+
+	t.Run("read timeout stays a timeout", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				ws, err := Upgrade(w, r)
+				if err != nil {
+					return
+				}
+				defer ws.Close()
+				time.Sleep(time.Second)
+			}))
+		defer srv.Close()
+
+		ws, _, err := Dial(context.Background(), "ws"+srv.URL[4:])
+		if err != nil {
+			t.Fatalf("Dial: %v", err)
+		}
+		defer ws.Close()
+
+		_ = ws.SetReadDeadline(time.Now().Add(30 * time.Millisecond))
+		_, _, err = ws.ReadMessage()
+
+		var ne net.Error
+		if !errors.As(err, &ne) || !ne.Timeout() {
+			t.Fatalf("err = %v, want a timeout", err)
+		}
+		var ce *CloseError
+		if errors.As(err, &ce) {
+			t.Error("a deadline the caller set was reported as the connection ending")
+		}
+	})
 }

@@ -212,10 +212,12 @@ writers, are not supported.
 
 - `*CloseError{Code, Text}` - how the connection ended. Use
   `IsCloseError(err, codes...)` and `IsUnexpectedCloseError(err, expected...)`
-  in a read loop. A peer that drops without a closing handshake gives code
-  1006 with the underlying error as the cause, so `errors.Is(err, io.EOF)`
-  still works and the helpers recognise an abrupt drop. 1006 is a local
-  observation and is never sent.
+  in a read loop. Every ending without a closing handshake gives code 1006 -
+  the stream ending, a stream cut off mid-frame, and a network failure such as
+  a reset or a broken pipe - with the underlying error as the cause, so
+  `errors.Is(err, io.EOF)` and the like still work. A read deadline is not an
+  ending: it stays the timeout it was, since the connection is still there and
+  the deadline was yours. 1006 is a local observation and is never sent.
 - `ErrReadLimit` - a message exceeded `SetReadLimit`; closed with 1009.
 - `ErrProtocol` - the peer broke the framing protocol; closed with 1002. Every
   violation matches this one sentinel, and the error text names the rule.

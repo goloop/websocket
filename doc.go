@@ -60,9 +60,10 @@
 // one (unbounded by default).
 //
 // Errors. How a connection ended is always a *CloseError: the code and reason
-// the peer sent, or 1006 with the underlying error as its cause when the
-// connection dropped without a closing handshake. Use IsCloseError and
-// IsUnexpectedCloseError in a read loop. A message cut off between fragments
+// the peer sent, or 1006 with the underlying error as its cause for every
+// ending without a closing handshake, a network failure such as a reset
+// included. A read deadline is not an ending and stays the timeout it was.
+// Use IsCloseError and IsUnexpectedCloseError in a read loop. A message cut off between fragments
 // is never returned as a whole message; that read matches io.ErrUnexpectedEOF
 // and the failure is sticky. ErrProtocol matches any framing violation by the
 // peer and ErrReadLimit a message that was too big.

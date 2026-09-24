@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-09-24
+
+Minor release: a network failure is an abnormal close, like every other way a
+connection ends without a closing handshake.
+
+### Fixed
+- A connection that fails rather than ends - a reset, a broken pipe - is
+  reported as a `*CloseError` with code 1006, as an orderly end of the stream
+  already was. Only the EOF family was converted, so the most ordinary crash
+  there is, a peer whose process died or whose container was killed, came back
+  as a raw `*net.OpError` that `IsUnexpectedCloseError` does not recognise:
+  the helper answered the question for a tidy disconnect and stayed silent for
+  a real one. The underlying error is kept as the cause, so
+  `errors.Is(err, syscall.ECONNRESET)` still matches.
+- A read deadline is still a timeout. It is not the connection ending, and the
+  deadline was the caller's own, so it is left exactly as it was and
+  `net.Error.Timeout` keeps reporting it.
+
 ## [0.8.2] - 2026-09-24
 
 Patch release.
