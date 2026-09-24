@@ -186,6 +186,14 @@ enable it. It uses "no context takeover": each message is compressed
 independently. The read limit is enforced on the *decompressed* size, guarding
 against decompression bombs.
 
+The window is the full 32 KiB and is not negotiable. An offer asking this end
+to compress with a smaller window (`server_max_window_bits`) is declined and
+the connection continues without compression, which RFC 7692 permits;
+`client_max_window_bits`, which browsers send, is accepted and not echoed. The
+standard library's deflate exposes no window-size control, and this package
+takes no dependency to add one. `Conn.CompressionEnabled` reports what was
+actually negotiated.
+
 ## Limits and deadlines
 
 - `SetReadLimit(n)` caps a single message (default 32 MiB). The cap covers the

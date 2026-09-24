@@ -31,6 +31,16 @@ correctly leaves upgrade requests alone).
 - `ReadJSON`/`WriteJSON` convenience.
 - **Same-origin by default**, to block cross-site WebSocket hijacking.
 
+## Stability
+
+The API is stable as of `v1.0.0` and follows semantic import versioning: no
+breaking change will land on `v1`. Both roles were checked against the full
+protocol conformance suite, in every section from framing and fragmentation to
+UTF-8 validation, closing and compression, and against a real browser.
+
+One optional feature is deliberately not implemented; see
+`server_max_window_bits` under [Security notes](#security-notes).
+
 ## Installation
 
 ```bash
@@ -97,6 +107,12 @@ ws.WriteMessage(websocket.TextMessage, []byte("hello"))
   limit applies to the *decompressed* size, so it also bounds
   permessage-deflate.
 - **Compression.** permessage-deflate uses "no context takeover" per message.
+  The window size is the full 32 KiB and is not negotiable: an offer asking
+  this end to compress with a smaller window (`server_max_window_bits`) is
+  declined and the connection continues uncompressed, which the extension
+  allows. `client_max_window_bits`, which browsers send, is accepted. The
+  standard library's deflate has no window-size control, and this package
+  takes no dependency to add one.
 - **Deadlines.** Set `SetReadDeadline`/`SetWriteDeadline` to protect against slow
   peers. `SetWriteDeadline` also ends a write in progress, and the deadline
   given to `WriteControl` bounds its wait for one.

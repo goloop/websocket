@@ -5,6 +5,35 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-09-24
+
+First stable release. The API is frozen: everything exported here keeps
+working on `v1`, and a breaking change would mean a new module path.
+
+There is no code change from 0.9.0. What earns the version is the evidence
+behind it, and the promise that follows.
+
+### What was checked
+
+- Both roles, server and client, against the full protocol conformance suite:
+  framing, ping/pong, reserved bits, opcodes, fragmentation, UTF-8 validation
+  including sequences split across frames, closing behaviour and close codes,
+  size limits, and compression across payloads and parameters. No failure and
+  no non-strict result in either role.
+- A real browser end to end: text, binary, a 300 KiB compressed message, a
+  900 KiB message written through the streaming writer, and a clean close.
+- `govulncheck`: nothing in this package, which has no dependencies to carry.
+
+### Known limitation
+
+- `server_max_window_bits` is not implemented. An offer asking this end to
+  compress with a window smaller than 32 KiB is declined and the connection
+  continues uncompressed, which RFC 7692 permits. The standard library's
+  deflate has no window-size control, and adding one would mean either a
+  dependency or a deflate implementation of this package's own; neither is
+  worth it for a parameter browsers do not ask for.
+  `client_max_window_bits`, which they do send, is accepted.
+
 ## [0.9.0] - 2026-09-24
 
 Minor release: a network failure is an abnormal close, like every other way a
