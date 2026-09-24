@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-09-24
+
+Patch release.
+
+### Fixed
+- A streamed message copies each fragment once instead of twice on its way to
+  the wire. Sending 256 MiB allocated 576 MiB of short-lived buffers; it now
+  allocates 320 MiB, and the live heap while streaming it stays near 1 MiB
+  either way. No behaviour change.
+
 ## [0.8.0] - 2026-09-24
 
 Minor release: `NextWriter` streams. Writing a message no longer means holding

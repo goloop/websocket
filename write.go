@@ -215,10 +215,12 @@ func (w *messageWriter) flushFragments() error {
 // is compressed; every later one is a continuation.
 func (w *messageWriter) sendFragment(n int, fin bool) error {
 	c := w.c
-	payload := make([]byte, n)
-	if _, err := io.ReadFull(&w.buf, payload); err != nil {
-		return err
-	}
+
+	// Next hands back the buffer's own bytes rather than a copy. They stay
+	// valid until the buffer is next written to, and nothing writes to it
+	// between here and the frame going out, while writeFrameLocked copies
+	// what it needs. That saves a copy of every fragment of every message.
+	payload := w.buf.Next(n)
 
 	opcode, compressed := w.mt, w.fw != nil
 	if w.started {
