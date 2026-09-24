@@ -144,6 +144,33 @@ ws.CloseWithStatus(websocket.CloseNormalClosure, "bye")
 піра (reader поверне `*CloseError`) викличте `Close`, щоб звільнити з'єднання.
 Сам `Close` закриває сокет без handshake.
 
+### Коди закриття
+
+Коди з RFC 6455 та реєстру IANA доступні як іменовані константи:
+
+| Константа | Код | |
+|---|---:|---|
+| `CloseNormalClosure` | 1000 | |
+| `CloseGoingAway` | 1001 | |
+| `CloseProtocolError` | 1002 | надсилається при порушенні фреймінгу |
+| `CloseUnsupportedData` | 1003 | |
+| `CloseNoStatusReceived` | 1005 | лише локально |
+| `CloseAbnormalClosure` | 1006 | лише локально: з'єднання обірвалося |
+| `CloseInvalidFramePayloadData` | 1007 | надсилається при невалідному UTF-8 |
+| `ClosePolicyViolation` | 1008 | |
+| `CloseMessageTooBig` | 1009 | надсилається при перевищенні ліміту читання |
+| `CloseMandatoryExtension` | 1010 | |
+| `CloseInternalServerErr` | 1011 | |
+| `CloseServiceRestart` | 1012 | |
+| `CloseTryAgainLater` | 1013 | |
+| `CloseBadGateway` | 1014 | |
+| `CloseTLSHandshake` | 1015 | лише локально |
+
+Три позначені «лише локально» описують, як завершилося з'єднання, і на дріт
+ніколи не йдуть; спроба надіслати таку дає `ErrBadClosePayload` - як і причина,
+що не є валідним UTF-8 або не вміщається в control-кадр. Коди 3000-4999
+доступні застосункам.
+
 ## Стиснення
 
 permessage-deflate (RFC 7692) узгоджується під час handshake, коли обидві

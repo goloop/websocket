@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-09-24
+
+Patch release.
+
+### Documentation
+- The package documentation covers what the last releases changed: the error
+  contract (a `*CloseError` for every ending, 1006 with its cause for an
+  abrupt one, `ErrProtocol`, `ErrReadLimit`), the streaming writer and
+  `ErrMessageInFlight`, the read and write limits, the dial budget and
+  cancellation, and what the default origin policy actually checks.
+- The reference lists the close-code constants, including `CloseBadGateway`
+  (1014), and says which three are local observations that are never sent.
+
 ## [0.8.1] - 2026-09-24
 
 Patch release.

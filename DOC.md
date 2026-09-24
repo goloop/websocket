@@ -152,6 +152,33 @@ ws.CloseWithStatus(websocket.CloseNormalClosure, "bye")
 peer's close arrives (the reader returns a `*CloseError`), call `Close` to
 release the connection. `Close` on its own closes the socket without a handshake.
 
+### Close codes
+
+The codes of RFC 6455 and the IANA registry are named constants:
+
+| Constant | Code | |
+|---|---:|---|
+| `CloseNormalClosure` | 1000 | |
+| `CloseGoingAway` | 1001 | |
+| `CloseProtocolError` | 1002 | sent for a framing violation |
+| `CloseUnsupportedData` | 1003 | |
+| `CloseNoStatusReceived` | 1005 | local only |
+| `CloseAbnormalClosure` | 1006 | local only: the connection dropped |
+| `CloseInvalidFramePayloadData` | 1007 | sent for invalid UTF-8 |
+| `ClosePolicyViolation` | 1008 | |
+| `CloseMessageTooBig` | 1009 | sent when the read limit is exceeded |
+| `CloseMandatoryExtension` | 1010 | |
+| `CloseInternalServerErr` | 1011 | |
+| `CloseServiceRestart` | 1012 | |
+| `CloseTryAgainLater` | 1013 | |
+| `CloseBadGateway` | 1014 | |
+| `CloseTLSHandshake` | 1015 | local only |
+
+The three marked "local only" describe how a connection ended and are never
+put on the wire; sending one is refused with `ErrBadClosePayload`, as is a
+reason that is not valid UTF-8 or does not fit a control frame. Codes 3000 to
+4999 are available to applications.
+
 ## Compression
 
 permessage-deflate (RFC 7692) is negotiated during the handshake when both sides
