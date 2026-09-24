@@ -94,18 +94,29 @@ mt, data, err := ws.ReadMessage()          // mt is TextMessage or BinaryMessage
 err = ws.WriteMessage(websocket.TextMessage, data)
 ```
 
-Reading is streamed (a compressed message is inflated in full first); writing
-is not: `NextWriter` buffers the whole message in memory and sends it on
-`Close`.
+Both directions stream. A compressed message is inflated in full before
+reading; `NextWriter` sends fragments as they fill, so a message larger than
+memory is a matter of writing it.
 
 ```go
 mt, r, err := ws.NextReader()   // r is an io.Reader
 w, err := ws.NextWriter(websocket.BinaryMessage) // w is an io.WriteCloser; Close sends
 ```
 
-Because the message is buffered, `io.Copy` into that writer from an unbounded
-source is bounded by nothing but memory. `SetWriteLimit` turns that into an
-error you can handle.
+A message that fits in one fragment (32 KiB) is still sent as a single
+unfragmented frame when the writer is closed, so nothing changes on the wire
+for ordinary messages. Larger ones go out as they are written, and only a
+fragment's worth is ever held.
+
+Only one message may be in flight. From the first fragment until `Close`,
+another `WriteMessage` or `NextWriter` returns `ErrMessageInFlight`, because
+its frames would be read as continuations of the open message. Control frames
+are unaffected and still go out between fragments, so pings, pongs and closes
+keep working while a long message is being sent. `Close` must be called to end
+the message.
+
+`SetWriteLimit` still bounds the message as a whole, and refuses before any
+part of an oversized one reaches the wire.
 
 A reader is valid for one message: once `NextReader` or `ReadMessage` has moved
 on, the old one fails with `ErrStaleReader` rather than serving bytes of the
@@ -183,6 +194,8 @@ writers, are not supported.
   violation matches this one sentinel, and the error text names the rule.
 - `ErrStaleReader` - the reader belongs to a message the connection has
   already moved past.
+- `ErrMessageInFlight` - a streamed message has frames on the wire; close its
+  writer before starting another.
 - `ErrConfig` - an option was given a value this package cannot use.
 - `ErrWriteClosed`, `ErrBadControl`, `ErrControlTooBig`, `ErrBadWriteType`,
   `ErrBadClosePayload` - the call's arguments were wrong. Nothing is written

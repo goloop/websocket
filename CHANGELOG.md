@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-09-24
+
+Minor release: `NextWriter` streams. Writing a message no longer means holding
+it.
+
+### Added
+- `NextWriter` sends fragments as they fill instead of buffering the whole
+  message until `Close`, so `io.Copy` from a large or unbounded source costs a
+  fragment of memory rather than the size of the message. A message that fits
+  in one fragment (32 KiB) is still sent as a single unfragmented frame, so
+  the wire is byte for byte what it was for ordinary messages, compressed or
+  not. A compressed message is deflated as it is written, with the sync-flush
+  octets stripped from the end of the last fragment as the format requires.
+- `ErrMessageInFlight`. Only one message may be in flight: from the first
+  fragment until `Close`, another `WriteMessage` or `NextWriter` returns it,
+  because those frames would be read as continuations of the open message.
+  Control frames are unaffected and still go out between fragments, so pings,
+  pongs and closes keep working for the whole of a long message.
+
+### Changed
+- `Close` on a message writer is now required to end the message, not merely
+  the moment it is sent. A writer that is abandoned after its first fragment
+  leaves the connection owing the peer a final frame, and data writes keep
+  returning `ErrMessageInFlight` until it is closed.
+
 ## [0.7.0] - 2026-09-24
 
 Minor release: a reader and a writer that say when they are no longer good.

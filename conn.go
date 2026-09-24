@@ -16,6 +16,12 @@ import (
 // its own (auto-pong, close echo) so a stuck peer cannot block the reader.
 const defaultControlDeadline = 10 * time.Second
 
+// defaultFragmentSize is how much an outgoing message is allowed to gather
+// before a fragment is sent. It is large enough that ordinary messages are
+// never fragmented and small enough that streaming a huge one costs a
+// predictable amount of memory rather than all of it.
+const defaultFragmentSize = 32 << 10 // 32 KiB
+
 // maxReadLimit is the largest message limit that keeps the derived compressed
 // bound (limit + limit/8 + 64) a positive int64. It is far past any real
 // message, so clamping to it costs nothing and removes the overflow.
@@ -39,6 +45,11 @@ var (
 	// It surfaces from Upgrade or Dial before anything reaches the network,
 	// rather than being quietly replaced by a default.
 	ErrConfig = errors.New("websocket: invalid configuration")
+
+	// ErrMessageInFlight means a streamed message has already put fragments
+	// on the wire, so another data message cannot start until it is closed.
+	// Control frames are unaffected and still go out between fragments.
+	ErrMessageInFlight = errors.New("websocket: a message is already being written")
 
 	// ErrStaleReader means the reader belongs to a message that is over: a
 	// later NextReader or ReadMessage has moved the connection on. Reading
@@ -128,8 +139,20 @@ type Conn struct {
 	// that is about to buffer a message needs to know the connection is
 	// already finished, and it cannot take the lock to find out: the lock may
 	// be held for as long as a write to a stalled peer takes.
-	writeDead        atomic.Pointer[error]
-	closeTold        atomic.Bool
+	writeDead atomic.Pointer[error]
+	closeTold atomic.Bool
+
+	// msgInFlight is set between the first fragment of a streamed message
+	// and its last. Control frames may go out between fragments, but another
+	// data message may not: the peer would read its frames as continuations
+	// of the one already open. inFlight mirrors it for a lock-free check.
+	msgInFlight bool // guarded by writeLock
+	inFlight    atomic.Bool
+
+	// fragmentSize is how much a streaming writer gathers before sending a
+	// fragment. A message smaller than this is still sent as one frame.
+	fragmentSize int
+
 	writeCompression bool
 	compressionLevel int
 	writeLimit       int64 // max size of one outgoing message, 0 for no bound
@@ -178,6 +201,7 @@ func newConn(conn net.Conn, isServer bool, br *bufio.Reader, subprotocol string,
 		readLimit:        defaultReadLimit,
 		readDecomp:       compression,
 		writeLock:        make(chan struct{}, 1),
+		fragmentSize:     defaultFragmentSize,
 		writeCompression: compression,
 		compressionLevel: level,
 	}

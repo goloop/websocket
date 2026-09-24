@@ -22,9 +22,9 @@ correctly leaves upgrade requests alone).
 ## Features
 
 - Server `Upgrade` (one-off or a reusable `Upgrader`) and client `Dial`.
-- Text and binary messages, with `ReadMessage`/`WriteMessage` and
-  `NextReader`/`NextWriter` (reads stream; a write buffers the message and
-  sends it on `Close`).
+- Text and binary messages, with `ReadMessage`/`WriteMessage` and streaming
+  `NextReader`/`NextWriter`; a message larger than a fragment is sent as it is
+  written, and control frames still flow between fragments.
 - Automatic ping/pong and a proper closing handshake, with overridable handlers.
 - permessage-deflate compression with a decompression-bomb guard.
 - Subprotocol negotiation, per-message size limits, deadlines.
