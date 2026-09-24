@@ -61,7 +61,7 @@ func deflate(data []byte, level int) ([]byte, error) {
 
 // inflate decompresses a permessage-deflate payload, appending the sync-flush
 // tail first. It stops once the output would exceed limit, returning
-// errReadLimit, which guards against decompression bombs.
+// ErrReadLimit, which guards against decompression bombs.
 func inflate(payload []byte, limit int64) ([]byte, error) {
 	fr := flateReaderPool.Get().(io.ReadCloser)
 	defer func() {
@@ -83,7 +83,7 @@ func inflate(payload []byte, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(out)) > limit {
-		return nil, errReadLimit
+		return nil, ErrReadLimit
 	}
 	return out, nil
 }

@@ -87,12 +87,12 @@ func (c *Conn) NextReader() (MessageType, io.Reader, error) {
 		return 0, nil, c.abort(err)
 	}
 	if int64(len(raw)) > compressedCap {
-		return 0, nil, c.failClose(CloseMessageTooBig, errReadLimit)
+		return 0, nil, c.failClose(CloseMessageTooBig, ErrReadLimit)
 	}
 	data, err := inflate(raw, c.readLimit)
 	if err != nil {
-		if err == errReadLimit {
-			return 0, nil, c.failClose(CloseMessageTooBig, errReadLimit)
+		if err == ErrReadLimit {
+			return 0, nil, c.failClose(CloseMessageTooBig, ErrReadLimit)
 		}
 		return 0, nil, c.abort(err)
 	}
@@ -176,7 +176,11 @@ func (c *Conn) handleControl(opcode MessageType) error {
 			echo = formatCloseMessage(code, "")
 		}
 		if c.closeHandler != nil {
-			_ = c.closeHandler(code, text)
+			// A handler that fails has something to say about the close, and
+			// dropping it left the caller with no way to report it at all.
+			if err := c.closeHandler(code, text); err != nil {
+				return err
+			}
 		} else {
 			_ = c.WriteControl(CloseMessage, echo,
 				time.Now().Add(defaultControlDeadline))
@@ -257,7 +261,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 			// bytes it was given even when an error comes with them, so
 			// returning them here would let the message the limit rejected
 			// reach the application anyway.
-			return 0, c.failClose(CloseMessageTooBig, errReadLimit)
+			return 0, c.failClose(CloseMessageTooBig, ErrReadLimit)
 		}
 		if r.text {
 			if verr := r.valid.write(p[:n]); verr != nil {

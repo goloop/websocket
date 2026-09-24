@@ -154,8 +154,18 @@ writers, are not supported.
 
 ## Errors
 
-- `*CloseError{Code, Text}` - the peer closed. Use `IsCloseError(err, codes...)`
-  and `IsUnexpectedCloseError(err, expected...)` in a read loop.
+- `*CloseError{Code, Text}` - how the connection ended. Use
+  `IsCloseError(err, codes...)` and `IsUnexpectedCloseError(err, expected...)`
+  in a read loop. A peer that drops without a closing handshake gives code
+  1006 with the underlying error as the cause, so `errors.Is(err, io.EOF)`
+  still works and the helpers recognise an abrupt drop. 1006 is a local
+  observation and is never sent.
+- `ErrReadLimit` - a message exceeded `SetReadLimit`; closed with 1009.
+- `ErrProtocol` - the peer broke the framing protocol; closed with 1002. Every
+  violation matches this one sentinel, and the error text names the rule.
+- `ErrWriteClosed`, `ErrBadControl`, `ErrControlTooBig`, `ErrBadWriteType`,
+  `ErrBadClosePayload` - the call's arguments were wrong. Nothing is written
+  and the connection is left as it was.
 - `ErrBadHandshake` - the client handshake was rejected.
 - `ErrHandshakeTooLarge` - the server's handshake response passed the byte
   budget.

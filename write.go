@@ -15,7 +15,7 @@ func (c *Conn) WriteMessage(mt MessageType, data []byte) error {
 		return c.WriteControl(mt, data, time.Time{})
 	}
 	if mt != TextMessage && mt != BinaryMessage {
-		return errBadWriteType
+		return ErrBadWriteType
 	}
 	if c.writeLimit > 0 && int64(len(data)) > c.writeLimit {
 		return ErrWriteLimit
@@ -52,15 +52,15 @@ func (c *Conn) WriteControl(mt MessageType, data []byte, deadline time.Time) err
 	// 24 used to be written as a close frame while the connection went on
 	// believing it had sent nothing.
 	if mt != CloseMessage && mt != PingMessage && mt != PongMessage {
-		return errBadControl
+		return ErrBadControl
 	}
 	if len(data) > maxControlFramePayload {
-		return errControlTooBig
+		return ErrControlTooBig
 	}
 	if mt == CloseMessage && !validClosePayload(data) {
 		// Refused before the lock is taken, so a bad argument neither writes
 		// bytes nor changes the state of the connection.
-		return errBadClosePayload
+		return ErrBadClosePayload
 	}
 
 	if err := c.lockWriteUntil(deadline); err != nil {
@@ -98,7 +98,7 @@ func (c *Conn) WriteControl(mt MessageType, data []byte, deadline time.Time) err
 // time.
 func (c *Conn) NextWriter(mt MessageType) (io.WriteCloser, error) {
 	if mt != TextMessage && mt != BinaryMessage {
-		return nil, errBadWriteType
+		return nil, ErrBadWriteType
 	}
 	return &messageWriter{c: c, mt: mt}, nil
 }
@@ -119,7 +119,7 @@ type messageWriter struct {
 // been closed; nothing is sent to the peer until Close.
 func (w *messageWriter) Write(p []byte) (int, error) {
 	if w.closed {
-		return 0, errWriteClosed
+		return 0, ErrWriteClosed
 	}
 	if limit := w.c.writeLimit; limit > 0 &&
 		int64(w.buf.Len())+int64(len(p)) > limit {

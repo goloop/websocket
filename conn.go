@@ -20,15 +20,32 @@ const defaultControlDeadline = 10 * time.Second
 // message, so clamping to it costs nothing and removes the overflow.
 const maxReadLimit = (math.MaxInt64 - 64) / 2
 
+// Errors a caller can act on. They are values rather than messages so that a
+// read or write loop can tell a message that was too big from a peer that
+// broke the protocol from a call that was simply wrong, with errors.Is and
+// without matching on text.
 var (
-	errWriteClosed     = errors.New("websocket: write to closed message writer")
-	errReadLimit       = errors.New("websocket: read limit exceeded")
-	errBadControl      = errors.New("websocket: not a control frame type")
-	errControlTooBig   = errors.New("websocket: control frame payload too large")
-	errBadClosePayload = errors.New(
+	// ErrReadLimit means a message exceeded [Conn.SetReadLimit]. The
+	// connection is closed with 1009.
+	ErrReadLimit = errors.New("websocket: read limit exceeded")
+
+	// ErrProtocol means the peer broke the framing protocol. Every such
+	// violation matches it, and the connection is closed with 1002; the
+	// error's own text says which rule was broken.
+	ErrProtocol = errors.New("websocket: protocol error")
+
+	// The rest are programming errors: the arguments of a call were wrong,
+	// so nothing is written and the connection is left as it was.
+	ErrWriteClosed     = errors.New("websocket: write to closed message writer")
+	ErrBadControl      = errors.New("websocket: not a control frame type")
+	ErrControlTooBig   = errors.New("websocket: control frame payload too large")
+	ErrBadWriteType    = errors.New("websocket: not a data message type")
+	ErrBadClosePayload = errors.New(
 		"websocket: close payload has a reserved code or invalid reason")
-	errBadWriteType = errors.New("websocket: not a data message type")
-	errInvalidUTF8  = protocolError("invalid UTF-8 in text message")
+)
+
+var (
+	errInvalidUTF8 = protocolError("invalid UTF-8 in text message")
 
 	// Both EOF sentinels wrap io.ErrUnexpectedEOF so that a caller can match
 	// "the connection ended in the middle of something" with one errors.Is,
@@ -47,6 +64,10 @@ var (
 // protocolError is an error caused by a peer violating the framing protocol. It
 // makes the connection send a 1002 close before failing the read.
 type protocolError string
+
+// Unwrap ties every framing violation to [ErrProtocol], so one errors.Is
+// recognises them all without naming each rule.
+func (e protocolError) Unwrap() error { return ErrProtocol }
 
 // Error implements the error interface, prefixing the violation with
 // "websocket: protocol error: ".
@@ -319,7 +340,7 @@ func (c *Conn) CloseWithStatus(code CloseCode, reason string) error {
 	// A code of 0 means "no status" and sends an empty payload; anything else
 	// has to be a code this end may put on the wire.
 	if code != 0 && !isValidSentCloseCode(code) {
-		return errBadClosePayload
+		return ErrBadClosePayload
 	}
 	return c.WriteControl(CloseMessage, formatCloseMessage(code, reason),
 		time.Now().Add(defaultControlDeadline))
@@ -342,8 +363,28 @@ func (c *Conn) abort(err error) error {
 			formatCloseMessage(CloseProtocolError, ""),
 			time.Now().Add(defaultControlDeadline))
 	}
+	err = asAbnormalClose(err)
 	if c.readErr == nil {
 		c.readErr = err
 	}
 	return err
+}
+
+// asAbnormalClose reports the connection ending without a closing handshake
+// the way every other ending is reported: as a *CloseError. Without it, a peer
+// that simply vanished produced a bare io.EOF, which IsUnexpectedCloseError
+// does not recognise, so the one helper meant for telling a clean shutdown
+// from a surprising one stayed silent for the most surprising case of all.
+//
+// The original error is kept as the cause, so matching io.EOF or
+// io.ErrUnexpectedEOF with errors.Is keeps working.
+func asAbnormalClose(err error) error {
+	var ce *CloseError
+	if errors.As(err, &ce) {
+		return err // the peer said why
+	}
+	if err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return err // a fault of its own, not the connection ending
+	}
+	return &CloseError{Code: CloseAbnormalClosure, cause: err}
 }

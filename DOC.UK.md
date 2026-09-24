@@ -148,8 +148,17 @@ permessage-deflate (RFC 7692) узгоджується під час handshake, 
 
 ## Помилки
 
-- `*CloseError{Code, Text}` - пір закрив з'єднання. Використовуйте
+- `*CloseError{Code, Text}` - як завершилося з'єднання. Використовуйте
   `IsCloseError(err, codes...)` і `IsUnexpectedCloseError(err, expected...)`.
+  Пір, що зник без closing-handshake, дає код 1006 із початковою помилкою як
+  причиною, тож `errors.Is(err, io.EOF)` працює, а хелпери бачать обрив. 1006 -
+  локальне спостереження, на дріт не надсилається.
+- `ErrReadLimit` - повідомлення перевищило `SetReadLimit`; закриття з 1009.
+- `ErrProtocol` - пір порушив протокол фреймінгу; закриття з 1002. Усі
+  порушення збігаються з цим одним сентинелом, а текст називає правило.
+- `ErrWriteClosed`, `ErrBadControl`, `ErrControlTooBig`, `ErrBadWriteType`,
+  `ErrBadClosePayload` - хибні аргументи виклику. Нічого не записано,
+  з'єднання лишається як було.
 - `ErrBadHandshake` - клієнтський handshake відхилено.
 - `ErrHandshakeTooLarge` - відповідь handshake перевищила байтовий бюджет.
 - `ErrCloseSent` - запис після початку closing-handshake.

@@ -39,11 +39,25 @@ var ErrCloseSent = errors.New("websocket: close sent")
 // so a caller can send something smaller instead.
 var ErrWriteLimit = errors.New("websocket: write limit exceeded")
 
-// CloseError records the close code and reason received from the peer.
+// CloseError records how the connection ended.
+//
+// Usually it is the close frame the peer sent, with its code and reason. It
+// is also how an abnormal end is reported: a connection that dropped without
+// a closing handshake yields code 1006 with the underlying error kept as the
+// cause, so errors.Is still finds io.EOF or io.ErrUnexpectedEOF beneath it.
+// 1006 is a local observation and is never put on the wire.
 type CloseError struct {
 	Code CloseCode
 	Text string
+
+	// cause is the error the connection actually failed with, for an
+	// abnormal close. It is nil for a close frame from the peer.
+	cause error
 }
+
+// Unwrap returns the error behind an abnormal close, so a caller can still
+// match io.EOF or io.ErrUnexpectedEOF through it.
+func (e *CloseError) Unwrap() error { return e.cause }
 
 // Error implements the error interface, formatting the close code and, when
 // present, the reason text the peer sent with the close frame.

@@ -22,19 +22,19 @@ func TestDiscardSharesTheMessageBudget(t *testing.T) {
 
 	_, r, err := c.NextReader()
 	if err != nil {
-		if !errors.Is(err, errReadLimit) {
+		if !errors.Is(err, ErrReadLimit) {
 			t.Fatalf("NextReader: %v", err)
 		}
 		return // rejecting the oversized frame up front is fine too
 	}
 	if _, err := io.ReadFull(r, make([]byte, 16)); err != nil {
-		if !errors.Is(err, errReadLimit) {
+		if !errors.Is(err, ErrReadLimit) {
 			t.Fatalf("read within the limit: %v", err)
 		}
 		return
 	}
-	if _, _, err := c.NextReader(); !errors.Is(err, errReadLimit) {
-		t.Fatalf("NextReader after a partial read = %v, want errReadLimit", err)
+	if _, _, err := c.NextReader(); !errors.Is(err, ErrReadLimit) {
+		t.Fatalf("NextReader after a partial read = %v, want ErrReadLimit", err)
 	}
 }
 
@@ -71,7 +71,7 @@ func TestReadLimitWithholdsOversizedBytes(t *testing.T) {
 
 	_, r, err := c.NextReader()
 	if err != nil {
-		if !errors.Is(err, errReadLimit) {
+		if !errors.Is(err, ErrReadLimit) {
 			t.Fatalf("NextReader: %v", err)
 		}
 		return
@@ -83,7 +83,7 @@ func TestReadLimitWithholdsOversizedBytes(t *testing.T) {
 		n, err := r.Read(buf)
 		got += n
 		if err != nil {
-			if !errors.Is(err, errReadLimit) {
+			if !errors.Is(err, ErrReadLimit) {
 				t.Fatalf("Read: %v", err)
 			}
 			break

@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-24
+
+Minor release: errors a caller can act on. A connection that drops without a
+closing handshake now reports a `*CloseError` where it used to report a bare
+`io.EOF`; `errors.Is(err, io.EOF)` still matches, a bare `err == io.EOF` does
+not.
+
+### Fixed
+- An abrupt end of the connection is reported as a `*CloseError` with code
+  1006, the way every other ending already was. It used to surface as a raw
+  `io.EOF`, which `IsUnexpectedCloseError` does not recognise, so the one
+  helper meant for telling a clean shutdown from a surprising one stayed
+  silent for the most surprising case of all. The original error is kept as
+  the cause, so `errors.Is(err, io.EOF)` and `errors.Is(err,
+  io.ErrUnexpectedEOF)` keep working, and 1006 is still never put on the wire.
+- A close handler's error reaches the caller. `SetCloseHandler` documents a
+  handler that returns an error, and the reader discarded it, so a handler
+  that failed had no way to report it.
+
+### Added
+- Exported errors for the conditions worth branching on: `ErrReadLimit` for a
+  message past the limit, `ErrProtocol` for any framing violation by the peer,
+  and `ErrWriteClosed`, `ErrBadControl`, `ErrControlTooBig`,
+  `ErrBadWriteType`, `ErrBadClosePayload` for a call whose arguments were
+  wrong. Until now these were unexported, so the only way to tell them apart
+  was to match on the message text.
+- `CloseError.Unwrap` returns the error behind an abnormal close.
+
 ## [0.4.0] - 2026-09-23
 
 Minor release: the protocol-contract and API fixes from the audit. Two changes

@@ -80,8 +80,8 @@ func TestWriteControlRejectsBadArguments(t *testing.T) {
 	c := newConn(nopConn{}, false, nil, "", false, 0)
 
 	for _, mt := range []MessageType{MessageType(11), MessageType(24), TextMessage} {
-		if err := c.WriteControl(mt, nil, time.Time{}); !errors.Is(err, errBadControl) {
-			t.Errorf("WriteControl(%d) = %v, want errBadControl", mt, err)
+		if err := c.WriteControl(mt, nil, time.Time{}); !errors.Is(err, ErrBadControl) {
+			t.Errorf("WriteControl(%d) = %v, want ErrBadControl", mt, err)
 		}
 	}
 	if c.closeSent {
@@ -90,13 +90,13 @@ func TestWriteControlRejectsBadArguments(t *testing.T) {
 
 	// Reserved codes describe a local observation and must never go out.
 	for _, code := range []CloseCode{CloseNoStatusReceived, CloseAbnormalClosure, CloseTLSHandshake} {
-		if err := c.CloseWithStatus(code, ""); !errors.Is(err, errBadClosePayload) {
-			t.Errorf("CloseWithStatus(%d) = %v, want errBadClosePayload", code, err)
+		if err := c.CloseWithStatus(code, ""); !errors.Is(err, ErrBadClosePayload) {
+			t.Errorf("CloseWithStatus(%d) = %v, want ErrBadClosePayload", code, err)
 		}
 	}
 	// A reason that is not UTF-8 is not a reason.
-	if err := c.WriteControl(CloseMessage, []byte{0x03, 0xe8, 0xff}, time.Time{}); !errors.Is(err, errBadClosePayload) {
-		t.Errorf("close with invalid UTF-8 reason = %v, want errBadClosePayload", err)
+	if err := c.WriteControl(CloseMessage, []byte{0x03, 0xe8, 0xff}, time.Time{}); !errors.Is(err, ErrBadClosePayload) {
+		t.Errorf("close with invalid UTF-8 reason = %v, want ErrBadClosePayload", err)
 	}
 	if c.closeSent {
 		t.Error("a refused close marked the close as sent")
