@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-24
+
+Minor release: a reader and a writer that say when they are no longer good.
+
+### Fixed
+- A reader is refused once the connection has moved past its message. Reading
+  from an old reader used to return bytes of the *next* message with no error
+  at all, because the reader held no state of its own and pulled straight from
+  the connection: code holding a reader across a `NextReader` call was handed
+  another message's bytes as if they were its own. It now fails with the new
+  `ErrStaleReader`.
+- A second `Close` on a message writer returns what the first one did. It
+  always returned nil, so the common `defer w.Close()` after a `Close` that
+  had failed reported success for a message that never went out.
+- `NextWriter` refuses a connection whose writes have already failed, or that
+  has sent a close, instead of accepting the whole message and failing at
+  `Close`. Everything written to that writer is buffered until `Close`, so the
+  old behaviour spent the memory of a full message to learn what was already
+  known.
+
+### Added
+- `ErrStaleReader`.
+
 ## [0.6.0] - 2026-09-24
 
 Minor release: configuration that is checked rather than guessed, and

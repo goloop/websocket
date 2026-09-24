@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,6 +39,11 @@ var (
 	// It surfaces from Upgrade or Dial before anything reaches the network,
 	// rather than being quietly replaced by a default.
 	ErrConfig = errors.New("websocket: invalid configuration")
+
+	// ErrStaleReader means the reader belongs to a message that is over: a
+	// later NextReader or ReadMessage has moved the connection on. Reading
+	// from it would return bytes of a different message.
+	ErrStaleReader = errors.New("websocket: reader belongs to a finished message")
 
 	// The rest are programming errors: the arguments of a call were wrong,
 	// so nothing is written and the connection is left as it was.
@@ -100,6 +106,7 @@ type Conn struct {
 	readLength    int64 // bytes delivered for the current message (for the limit)
 	readMsgType   MessageType
 	reader        *messageReader // the reader handed out for the message in flight
+	readerGen     uint64         // which message the current reader belongs to
 	inflated      []byte         // payload of the compressed message just returned
 	inMessage     bool           // a message is currently being read across frames
 	readDecomp    bool           // permessage-deflate negotiated for reading
@@ -113,9 +120,16 @@ type Conn struct {
 	// so a control write can give up waiting for it: a data write that is
 	// stuck on a peer that stopped reading must not also hold hostage the
 	// close, ping and pong frames the reader needs to send.
-	writeLock        chan struct{} // holds one token while a write is in progress
-	writeErr         error         // guarded by writeLock
-	closeSent        bool          // guarded by writeLock
+	writeLock chan struct{} // holds one token while a write is in progress
+	writeErr  error         // guarded by writeLock
+	closeSent bool          // guarded by writeLock
+
+	// Mirrors of the two above, readable without the write lock. A writer
+	// that is about to buffer a message needs to know the connection is
+	// already finished, and it cannot take the lock to find out: the lock may
+	// be held for as long as a write to a stalled peer takes.
+	writeDead        atomic.Pointer[error]
+	closeTold        atomic.Bool
 	writeCompression bool
 	compressionLevel int
 	writeLimit       int64 // max size of one outgoing message, 0 for no bound
@@ -361,6 +375,7 @@ func (c *Conn) CloseWithStatus(code CloseCode, reason string) error {
 func (c *Conn) setWriteErr(err error) error {
 	if c.writeErr == nil {
 		c.writeErr = err
+		c.writeDead.Store(&err)
 	}
 	return c.writeErr
 }

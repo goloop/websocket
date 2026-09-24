@@ -65,13 +65,15 @@ func (c *Conn) NextReader() (MessageType, io.Reader, error) {
 	c.readLength = 0
 	c.reader = nil
 	c.inflated = nil
+	c.readerGen++
 
 	src := &frameSource{c: c}
 	if !compressed {
 		// The reader is kept so that discarding this message later runs
 		// through it, sharing its budget and its UTF-8 state instead of
 		// starting both again from zero.
-		mr := &messageReader{c: c, src: src, text: opcode == TextMessage}
+		mr := &messageReader{c: c, src: src, text: opcode == TextMessage,
+			gen: c.readerGen}
 		c.reader = mr
 		return c.readMsgType, mr, nil
 	}
@@ -234,6 +236,7 @@ type messageReader struct {
 	c     *Conn
 	src   io.Reader
 	text  bool
+	gen   uint64 // the message this reader was handed out for
 	valid utf8Validator
 }
 
@@ -242,6 +245,12 @@ type messageReader struct {
 // across frame or Read boundaries is still checked correctly.
 func (r *messageReader) Read(p []byte) (int, error) {
 	c := r.c
+	if r.gen != c.readerGen {
+		// The connection has moved on to another message. This reader has no
+		// bytes of its own left anywhere: every byte it could return now
+		// would belong to a message the caller did not ask this reader for.
+		return 0, ErrStaleReader
+	}
 	if c.readErr != nil {
 		return 0, c.readErr
 	}

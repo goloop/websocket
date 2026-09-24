@@ -107,6 +107,13 @@ Because the message is buffered, `io.Copy` into that writer from an unbounded
 source is bounded by nothing but memory. `SetWriteLimit` turns that into an
 error you can handle.
 
+A reader is valid for one message: once `NextReader` or `ReadMessage` has moved
+on, the old one fails with `ErrStaleReader` rather than serving bytes of the
+next message. `NextWriter` refuses a connection whose writes have already
+failed, or that has sent a close, instead of accepting a whole message and
+failing at `Close`; and `Close` returns the same result however often it is
+called, so a deferred `Close` after a failed one does not report success.
+
 JSON:
 
 ```go
@@ -174,6 +181,9 @@ writers, are not supported.
 - `ErrReadLimit` - a message exceeded `SetReadLimit`; closed with 1009.
 - `ErrProtocol` - the peer broke the framing protocol; closed with 1002. Every
   violation matches this one sentinel, and the error text names the rule.
+- `ErrStaleReader` - the reader belongs to a message the connection has
+  already moved past.
+- `ErrConfig` - an option was given a value this package cannot use.
 - `ErrWriteClosed`, `ErrBadControl`, `ErrControlTooBig`, `ErrBadWriteType`,
   `ErrBadClosePayload` - the call's arguments were wrong. Nothing is written
   and the connection is left as it was.

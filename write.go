@@ -89,6 +89,7 @@ func (c *Conn) WriteControl(mt MessageType, data []byte, deadline time.Time) err
 	}
 	if mt == CloseMessage {
 		c.closeSent = true
+		c.closeTold.Store(true)
 	}
 	return nil
 }
@@ -99,6 +100,16 @@ func (c *Conn) WriteControl(mt MessageType, data []byte, deadline time.Time) err
 func (c *Conn) NextWriter(mt MessageType) (io.WriteCloser, error) {
 	if mt != TextMessage && mt != BinaryMessage {
 		return nil, ErrBadWriteType
+	}
+	// Refuse now rather than at Close. Everything written to this writer is
+	// buffered until then, so a connection that is already finished would
+	// otherwise be told only after the caller had built the whole message,
+	// which for a large one means spending the memory to learn nothing.
+	if err := c.writeDead.Load(); err != nil {
+		return nil, *err
+	}
+	if c.closeTold.Load() {
+		return nil, ErrCloseSent
 	}
 	return &messageWriter{c: c, mt: mt}, nil
 }
@@ -113,6 +124,7 @@ type messageWriter struct {
 	mt     MessageType
 	buf    bytes.Buffer
 	closed bool
+	err    error // the result of the one Close that did the work
 }
 
 // Write appends to the in-memory message buffer. It fails once the writer has
@@ -134,7 +146,10 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 // writer done. It is idempotent: a second call is a no-op and returns nil.
 func (w *messageWriter) Close() error {
 	if w.closed {
-		return nil
+		// Answer the same thing every time. Returning nil to a second Close
+		// after the first had failed reported success for a message that was
+		// never sent, and a deferred Close is exactly where that is read.
+		return w.err
 	}
 	w.closed = true
 
@@ -147,6 +162,7 @@ func (w *messageWriter) Close() error {
 	// w.closed first, so nothing here is read again.
 	w.buf = bytes.Buffer{}
 	w.c = nil
+	w.err = err
 
 	return err
 }
