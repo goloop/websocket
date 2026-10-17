@@ -295,15 +295,25 @@ func (r *messageReader) Read(p []byte) (int, error) {
 // utf8Validator incrementally checks a byte stream for valid UTF-8, tolerating
 // a rune whose bytes are split across successive write calls.
 type utf8Validator struct {
-	pending []byte // bytes of an incomplete trailing rune (1..3 bytes)
+	pending [utf8.UTFMax]byte
+	n       int
 }
 
-// write validates the next chunk of bytes, carrying over the bytes of an
-// incomplete trailing rune. It returns errInvalidUTF8 on an invalid sequence.
 func (v *utf8Validator) write(p []byte) error {
-	if len(v.pending) > 0 {
-		p = append(v.pending, p...)
-		v.pending = nil
+	if v.n > 0 {
+		for len(p) > 0 && !utf8.FullRune(v.pending[:v.n]) {
+			v.pending[v.n] = p[0]
+			v.n++
+			p = p[1:]
+		}
+		if !utf8.FullRune(v.pending[:v.n]) {
+			return nil
+		}
+		r, size := utf8.DecodeRune(v.pending[:v.n])
+		if r == utf8.RuneError && size == 1 {
+			return errInvalidUTF8
+		}
+		v.n = 0
 	}
 	for len(p) > 0 {
 		if p[0] < utf8.RuneSelf {
@@ -313,8 +323,7 @@ func (v *utf8Validator) write(p []byte) error {
 		r, size := utf8.DecodeRune(p)
 		if r == utf8.RuneError && size == 1 {
 			if !utf8.FullRune(p) {
-				// A valid prefix of a rune split across the boundary: carry it.
-				v.pending = append(v.pending[:0], p...)
+				v.n = copy(v.pending[:], p)
 				return nil
 			}
 			return errInvalidUTF8
@@ -324,16 +333,13 @@ func (v *utf8Validator) write(p []byte) error {
 	return nil
 }
 
-// done reports whether the stream ended on a rune boundary.
 func (v *utf8Validator) done() error {
-	if len(v.pending) > 0 {
+	if v.n > 0 {
 		return errInvalidUTF8
 	}
 	return nil
 }
 
-// readPayload reads up to len(p) bytes of the current frame's payload, unmasking
-// in place. It returns io.EOF when the frame is exhausted.
 func (c *Conn) readPayload(p []byte) (int, error) {
 	if c.readRemaining == 0 {
 		return 0, io.EOF

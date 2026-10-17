@@ -1,4 +1,4 @@
-[![deps.dev](https://img.shields.io/badge/deps.dev-insights-4c8dbc)](https://deps.dev/go/github.com%2Fgoloop%2Fwebsocket) [![License](https://img.shields.io/badge/license-MIT-brightgreen)](https://github.com/goloop/websocket/blob/master/LICENSE) [![License](https://img.shields.io/badge/godoc-YES-green)](https://pkg.go.dev/github.com/goloop/websocket) [![Stay with Ukraine](https://img.shields.io/static/v1?label=Stay%20with&message=Ukraine%20♥&color=ffD700&labelColor=0057B8&style=flat)](https://u24.gov.ua/)
+[![deps.dev](https://img.shields.io/badge/deps.dev-insights-4c8dbc)](https://deps.dev/go/github.com%2Fgoloop%2Fwebsocket) [![License](https://img.shields.io/badge/license-MIT-brightgreen)](https://github.com/goloop/websocket/blob/v1/LICENSE) [![License](https://img.shields.io/badge/godoc-YES-green)](https://pkg.go.dev/github.com/goloop/websocket) [![Stay with Ukraine](https://img.shields.io/static/v1?label=Stay%20with&message=Ukraine%20♥&color=ffD700&labelColor=0057B8&style=flat)](https://u24.gov.ua/)
 
 # websocket
 
@@ -142,3 +142,7 @@ Contributions are welcome. Please run `go test ./...`, `go test -race ./...`,
 ## License
 
 `websocket` is released under the MIT License. See [LICENSE](LICENSE).
+
+## Release v1.0.1
+
+Clamp upgrade read limits and validate split UTF-8 without copying frames.

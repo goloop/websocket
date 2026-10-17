@@ -140,7 +140,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 
 	conn := newConn(netConn, true, brw.Reader, subprotocol, compression, u.compressionLevel)
 	if u.readLimit > 0 {
-		conn.readLimit = u.readLimit
+		conn.SetReadLimit(u.readLimit)
 	}
 	return conn, nil
 }

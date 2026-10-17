@@ -249,3 +249,7 @@ writers, are not supported.
 - `io.ErrUnexpectedEOF` - the connection ended in the middle of a message. What
   arrived is a prefix, never a whole message, and the error is sticky: further
   reads fail too. Match it with `errors.Is`.
+
+## Release v1.0.1
+
+Clamp upgrade read limits and validate split UTF-8 without copying frames.
